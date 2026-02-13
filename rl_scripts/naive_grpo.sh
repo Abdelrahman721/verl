@@ -1,6 +1,6 @@
 set -x
 
-MODEL_PATH="Qwen/Qwen3-4B"
+MODEL_PATH="Qwen/Qwen3-4B-Base"
 TRAIN_PARQUET="$HOME/data/gsm8k/train.parquet"
 VAL_PARQUET="$HOME/data/gsm8k/test.parquet"
 
