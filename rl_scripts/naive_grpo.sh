@@ -1,8 +1,8 @@
 set -x
 
 MODEL_PATH="Qwen/Qwen3-4B-Base"
-TRAIN_PARQUET="$HOME/data/gsm8k/train.parquet"
-VAL_PARQUET="$HOME/data/gsm8k/test.parquet"
+TRAIN_PARQUET="$HOME/data/math/train.parquet"
+VAL_PARQUET="$HOME/data/math/test.parquet"
 
 GRPO_GROUP_N=8
 PROMPT_BATCH=64
