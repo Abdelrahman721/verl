@@ -52,11 +52,14 @@ python3 -m verl.trainer.main_ppo \
   actor_rollout_ref.actor.loss_agg_mode="seq-mean-token-mean" \
   algorithm.use_kl_in_reward=False \
   trainer.logger='["console","wandb"]' \
-  trainer.project_name="verl_vanilla_grpo" \
-  trainer.experiment_name="run_$(date +%Y%m%d_%H%M%S)" \
+  trainer.project_name="RL-Exps" \
+  trainer.experiment_name="run_naive_grpo_$(date +%Y%m%d_%H%M%S)" \
   trainer.save_freq=20 \
-  trainer.test_freq=10 \
-  trainer.n_gpus_per_node=8 \
+  trainer.test_freq=20 \
+  trainer.nnodes=1 \
+  trainer.n_gpus_per_node=2 \
+  trainer.rollout_data_dir=$HOME/verl_dumps/rollouts \
+  trainer.validation_data_dir=$HOME/verl_dumps/val \
   trainer.total_epochs=1 $@
 
 
