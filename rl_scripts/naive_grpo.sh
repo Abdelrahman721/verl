@@ -14,7 +14,7 @@ KL_COEF=1e-3
 KL_TYPE="kl"
 
 MAX_PROMPT_LEN=512
-MAX_RESPONSE_LEN=1024
+MAX_RESPONSE_LEN=4096
 
 TEMP=1.0
 TOP_P=1.0
@@ -60,6 +60,6 @@ python3 -m verl.trainer.main_ppo \
   trainer.n_gpus_per_node=2 \
   trainer.rollout_data_dir=$HOME/verl_dumps/rollouts \
   trainer.validation_data_dir=$HOME/verl_dumps/val \
-  trainer.total_epochs=1 $@
+  trainer.total_epochs=2 $@
 
 
