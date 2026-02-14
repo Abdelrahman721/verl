@@ -40,10 +40,10 @@ python3 -m verl.trainer.main_ppo \
   data.truncation='error' \
   \
   data.train_batch_size="${TRAIN_BATCH_SIZE}" \
-  data.gen_batch_size="${GEN_BATCH_SIZE}" \
-  algorithm.filter_groups.enable=True \
-  algorithm.filter_groups.metric="${FILTER_METRIC}" \
-  algorithm.filter_groups.max_num_gen_batches="${MAX_NUM_GEN_BATCHES}" \
+  +data.gen_batch_size="${GEN_BATCH_SIZE}" \
+  +algorithm.filter_groups.enable=True \
+  +algorithm.filter_groups.metric="${FILTER_METRIC}" \
+  +algorithm.filter_groups.max_num_gen_batches="${MAX_NUM_GEN_BATCHES}" \
   \
   actor_rollout_ref.model.path="${MODEL_PATH}" \
   actor_rollout_ref.model.use_remove_padding=True \
@@ -54,20 +54,13 @@ python3 -m verl.trainer.main_ppo \
   actor_rollout_ref.rollout.gpu_memory_utilization=0.6 \
   \
   actor_rollout_ref.rollout.calculate_log_probs=True \
-  algorithm.rollout_correction.rollout_is="${ROLLOUT_IS_LEVEL}" \
+  +algorithm.rollout_correction.rollout_is="${ROLLOUT_IS_LEVEL}" \
   algorithm.rollout_correction.rollout_is_threshold="${ROLLOUT_IS_THRESHOLD}" \
   algorithm.rollout_correction.bypass_mode=false \
   algorithm.rollout_correction.rollout_rs=null \
   algorithm.rollout_correction.rollout_rs_threshold=null \
-  algorithm.rollout_correction.rollout_rs_threshold_lower=null \
-  algorithm.rollout_correction.rollout_token_veto_threshold=null \
-  \
-  actor_rollout_ref.actor.rollout_correction.rollout_is="${ROLLOUT_IS_LEVEL}" \
-  actor_rollout_ref.actor.rollout_correction.rollout_is_threshold="${ROLLOUT_IS_THRESHOLD}" \
-  actor_rollout_ref.actor.rollout_correction.rollout_rs=null \
-  actor_rollout_ref.actor.rollout_correction.rollout_rs_threshold=null \
-  actor_rollout_ref.actor.rollout_correction.rollout_rs_threshold_lower=null \
-  actor_rollout_ref.actor.rollout_correction.rollout_token_veto_threshold=null \
+  +algorithm.rollout_correction.rollout_rs_threshold_lower=null \
+  +algorithm.rollout_correction.rollout_token_veto_threshold=null \
   \
   actor_rollout_ref.actor.loss_agg_mode="token-mean" \
   \
