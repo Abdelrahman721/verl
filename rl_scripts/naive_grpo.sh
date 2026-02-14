@@ -19,6 +19,9 @@ MAX_RESPONSE_LEN=4096
 TEMP=1.0
 TOP_P=1.0
 
+PROJECT_NAME="RL-Exps"
+EXP_NAME="naive_grpo"
+
 python3 -m verl.trainer.main_ppo \
   algorithm.adv_estimator=grpo \
   actor_rollout_ref.model.path="${MODEL_PATH}" \
@@ -52,8 +55,8 @@ python3 -m verl.trainer.main_ppo \
   actor_rollout_ref.actor.loss_agg_mode="seq-mean-token-mean" \
   algorithm.use_kl_in_reward=False \
   trainer.logger='["console","wandb"]' \
-  trainer.project_name="RL-Exps" \
-  trainer.experiment_name="run_naive_grpo_$(date +%Y%m%d_%H%M%S)" \
+  trainer.project_name="${PROJECT_NAME}" \
+  trainer.experiment_name="${EXP_NAME}_$(date +%Y%m%d_%H%M%S)" \
   trainer.save_freq=20 \
   trainer.test_freq=20 \
   trainer.nnodes=1 \
