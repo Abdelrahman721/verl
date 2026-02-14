@@ -5,7 +5,7 @@ TRAIN_FILES="$HOME/data/math/train.parquet"
 VAL_FILES="$HOME/data/math/test.parquet"
 
 PROJECT_NAME="RL-Exps"
-EXP_NAME="naive_grpo"
+EXP_NAME="grpo++"
 
 MAX_PROMPT_LEN=512
 MAX_RESPONSE_LEN=4096
