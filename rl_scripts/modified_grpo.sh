@@ -1,10 +1,10 @@
 set -x
 
 MODEL_PATH="Qwen/Qwen3-4B-Base"
-TRAIN_FILES="$HOME/data/math/train.parquet"
-VAL_FILES="$HOME/data/math/test.parquet"
+TRAIN_FILES="/workspace/verl/data/icd/dataset_a.parquet"
+VAL_FILES="/workspace/verl/data/icd/dataset_b.parquet"
 
-PROJECT_NAME="RL-Exps"
+PROJECT_NAME="ICD-RL"
 EXP_NAME="grpo++"
 
 MAX_PROMPT_LEN=512
@@ -82,6 +82,9 @@ python3 -m verl.trainer.main_ppo \
   actor_rollout_ref.ref.log_prob_micro_batch_size_per_gpu=4 \
   actor_rollout_ref.ref.fsdp_config.param_offload=True \
   actor_rollout_ref.rollout.tensor_model_parallel_size=2 \
+  \
+  custom_reward_function.path="/workspace/verl/verl/utils/reward_score/icd.py" \
+  custom_reward_function.name="compute_score" \
   \
   trainer.critic_warmup=0 \
   trainer.logger='["console","wandb"]' \
