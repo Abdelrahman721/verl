@@ -122,7 +122,7 @@ def compute_score(data_source, solution_str, ground_truth, extra_info=None):
     normalized_ground_truth = [normalize_icd_code(gt) for gt in ground_truth_list]
     
     # Extract ICD code from solution
-    extracted_code = extract_solution(solution_str, method=method)
+    extracted_code = extract_solution(solution_str)
     if extracted_code is None:
         return -1.0
     
