@@ -1,0 +1,13 @@
+datasets/snomed_synthesis_dataset_train.csv filter=lfs diff=lfs merge=lfs -text
+datasets/sampled_snomed_findings_2000_labels_closest_to_60_test.csv filter=lfs diff=lfs merge=lfs -text
+datasets/sampled_snomed_findings_2000_labels_closest_to_60_train.csv filter=lfs diff=lfs merge=lfs -text
+datasets/snomed_synthesis_dataset.csv filter=lfs diff=lfs merge=lfs -text
+datasets/snomed_synthesis_dataset_set_B_test.csv filter=lfs diff=lfs merge=lfs -text
+datasets/snomed_synthesis_dataset_set_B_train.csv filter=lfs diff=lfs merge=lfs -text
+datasets/snomed_synthesis_dataset_set_C_test.csv filter=lfs diff=lfs merge=lfs -text
+datasets/snomed_synthesis_dataset_set_C_train.csv filter=lfs diff=lfs merge=lfs -text
+datasets/term_to_id_map.json filter=lfs diff=lfs merge=lfs -text
+datasets/sampled_snomed_findings_2000_labels_closest_to_60.csv filter=lfs diff=lfs merge=lfs -text
+datasets/snomed_synthesis_dataset_set_B.csv filter=lfs diff=lfs merge=lfs -text
+datasets/snomed_synthesis_dataset_set_C.csv filter=lfs diff=lfs merge=lfs -text
+datasets/snomed_synthesis_dataset_test.csv filter=lfs diff=lfs merge=lfs -text
