@@ -88,6 +88,63 @@ def normalize_icd_code(code):
     code = code.replace('.', '')
     return code
 
+def compute_length_score(solution_str, ground_truth):
+    """Compute the length score for the solution string.
+    
+    Args:
+        solution_str: the solution text from the model
+        ground_truth: the ground truth ICD code. Can be a string (e.g., "E11.9") or list of strings
+        
+    Returns:
+        float: The computed length score
+    """
+    total_length = len(solution_str.split())
+    if total_length < 32:
+        return -1.0
+    elif total_length < 64:
+        return -0.5
+    elif total_length < 128:
+        return 0.0
+    elif total_length < 256:
+        return -0.5
+    else:
+        return -1.0
+
+def compute_accuracy_score(solution_str, ground_truth):
+    """Compute the accuracy score for the solution string.
+    
+    Args:
+        solution_str: the solution text from the model
+        ground_truth: the ground truth ICD code. Can be a string (e.g., "E11.9") or list of strings
+        
+    Returns:
+        float: The computed accuracy score
+    """
+    extracted_code = extract_solution(solution_str)
+    total_length = max(len(extracted_code), len(ground_truth))
+    matched_length = 0
+    for c1, c2 in zip(extracted_code, ground_truth):
+        if c1 == c2:
+            matched_length += 1
+        else:
+            break
+    return round(matched_length / total_length, 2)
+
+def compute_language_score(solution_str, ground_truth):
+    """Compute the language score for the solution string.
+    
+    Args:
+        solution_str: the solution text from the model
+        ground_truth: the ground truth ICD code. Can be a string (e.g., "E11.9") or list of strings
+        
+    Returns:
+        float: The computed language score
+    """
+    clean_text = re.sub(r'<.*?>|\$.*?\$|\\\[.*?\\\]', '', solution_str, flags=re.DOTALL)
+    total_length = len(clean_text)
+    english_chars = len(re.findall(r'[a-zA-Z]', clean_text))
+    non_english_chars = total_length - english_chars
+    return -round(non_english_chars / total_length, 2)
 
 def compute_score(data_source, solution_str, ground_truth, extra_info=None):
     """The scoring function for ICD coding datasets.
@@ -103,33 +160,14 @@ def compute_score(data_source, solution_str, ground_truth, extra_info=None):
     Returns:
         float: The computed score
     """
-    # Handle ground_truth - it might be a string or list
-    # Based on the dataset creation script, ground_truth is stored as a string in reward_model.ground_truth
-    if isinstance(ground_truth, list):
-        ground_truth_list = ground_truth
-    elif isinstance(ground_truth, str):
-        ground_truth_list = [ground_truth]
-    else:
-        # If it's a dict, try to extract the target
-        if isinstance(ground_truth, dict) and "target" in ground_truth:
-            ground_truth_list = ground_truth["target"]
-            if not isinstance(ground_truth_list, list):
-                ground_truth_list = [ground_truth_list]
-        else:
-            ground_truth_list = [str(ground_truth)]
-    
-    # Normalize ground truth codes (remove periods for comparison)
-    normalized_ground_truth = [normalize_icd_code(gt) for gt in ground_truth_list]
-    
-    # Extract ICD code from solution
-    extracted_code = extract_solution(solution_str)
-    if extracted_code is None:
-        return -1.0
-    
-    normalized_extracted = normalize_icd_code(extracted_code)
-    
-    # Check for exact match (after normalization)
-    if normalized_extracted in normalized_ground_truth:
-        return 1.0
-    else:
-        return -1.0
+    score_functions = {
+        "reward/length_score": compute_length_score,
+        "reward/accuracy_score": compute_accuracy_score,
+        "reward/language_score": compute_language_score,
+    }
+    scores = {}
+    for key, func in score_functions.items():
+        scores[key] = func(solution_str, ground_truth)
+
+    scores["score"] = sum(scores.values())
+    return scores

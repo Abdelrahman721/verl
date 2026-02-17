@@ -1,8 +1,8 @@
 set -x
 
 MODEL_PATH="Qwen/Qwen3-4B-Base"
-TRAIN_FILES="/workspace/verl/data/icd/dataset_a.parquet"
-VAL_FILES="/workspace/verl/data/icd/dataset_b.parquet"
+TRAIN_FILES="/workspace/verl/data/dataset_a.parquet"
+VAL_FILES="/workspace/verl/data/dataset_b.parquet"
 
 PROJECT_NAME="ICD-RL"
 EXP_NAME="grpo++"
