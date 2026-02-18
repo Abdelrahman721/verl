@@ -111,7 +111,7 @@ def compute_length_score(solution_str, ground_truth):
     # else:
     #     return -1.0
 
-def compute_accuracy_score(solution_str, ground_truth, method="strict"):
+def compute_accuracy_score(solution_str, ground_truth, method="relaxed"):
     """Compute the accuracy score for the solution string.
     
     Args:
@@ -122,13 +122,17 @@ def compute_accuracy_score(solution_str, ground_truth, method="strict"):
         float: The computed accuracy score
     """
     extracted_code = extract_solution(solution_str)
+    if extracted_code is None and method == "strict":
+        return 0.0
+    if extracted_code is None and method == "relaxed":
+        return -1.0
     extracted_code = normalize_icd_code(extracted_code)
     ground_truth = normalize_icd_code(ground_truth)
     if method == "strict":
         if extracted_code == ground_truth:
             return 1.0
         else:
-            return -1.0
+            return 0.0
     total_length = max(len(extracted_code), len(ground_truth))
     matched_length = 0
     for c1, c2 in zip(extracted_code, ground_truth):
