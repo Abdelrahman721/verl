@@ -5,7 +5,7 @@ TRAIN_FILES="/workspace/verl/data/dataset_a.parquet"
 VAL_FILES="/workspace/verl/data/dataset_b.parquet"
 
 PROJECT_NAME="ICD-RL"
-EXP_NAME="grpo++"
+EXP_NAME="no_length_penalty"
 
 MAX_PROMPT_LEN=512
 MAX_RESPONSE_LEN=4096
@@ -26,6 +26,8 @@ ROLLOUT_IS_THRESHOLD=2.0
 
 FILTER_METRIC="seq_reward"
 MAX_NUM_GEN_BATCHES=10
+
+export WANDB_API_KEY="7eadd40652b0651b0f12dc86ea4d5fde56db2e2a"
 
 python3 -m verl.trainer.main_ppo \
   algorithm.adv_estimator=grpo \
