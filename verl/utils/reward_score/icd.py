@@ -98,17 +98,18 @@ def compute_length_score(solution_str, ground_truth):
     Returns:
         float: The computed length score
     """
-    total_length = len(solution_str.split())
-    if total_length < 32:
-        return -1.0
-    elif total_length < 64:
-        return -0.5
-    elif total_length < 128:
-        return 0.0
-    elif total_length < 256:
-        return -0.5
-    else:
-        return -1.0
+    return 0.0
+    # total_length = len(solution_str.split())
+    # if total_length < 32:
+    #     return -1.0
+    # elif total_length < 64:
+    #     return -0.5
+    # elif total_length < 128:
+    #     return 0.0
+    # elif total_length < 256:
+    #     return -0.5
+    # else:
+    #     return -1.0
 
 def compute_accuracy_score(solution_str, ground_truth, method="strict"):
     """Compute the accuracy score for the solution string.
@@ -121,8 +122,13 @@ def compute_accuracy_score(solution_str, ground_truth, method="strict"):
         float: The computed accuracy score
     """
     extracted_code = extract_solution(solution_str)
+    extracted_code = normalize_icd_code(extracted_code)
+    ground_truth = normalize_icd_code(ground_truth)
     if method == "strict":
-        return int(extracted_code == ground_truth)
+        if extracted_code == ground_truth:
+            return 1.0
+        else:
+            return -1.0
     total_length = max(len(extracted_code), len(ground_truth))
     matched_length = 0
     for c1, c2 in zip(extracted_code, ground_truth):
@@ -130,6 +136,8 @@ def compute_accuracy_score(solution_str, ground_truth, method="strict"):
             matched_length += 1
         else:
             break
+    if matched_length == 0:
+        return -1.0
     return round(matched_length / total_length, 2)
 
 import re
@@ -161,11 +169,12 @@ def compute_language_score(solution_str, ground_truth=None):
     total_alpha = len(all_alpha)
 
     if total_alpha == 0:
-        return 0.0
+        return -1.0
 
     english_letters = len(letters)
+    non_english_letters = total_alpha - english_letters
 
-    return round(english_letters / total_alpha, 2)
+    return -1 * (non_english_letters / total_alpha)
 
 
 def compute_score(data_source, solution_str, ground_truth, extra_info=None):

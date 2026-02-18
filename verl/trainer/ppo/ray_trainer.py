@@ -385,6 +385,21 @@ class RayPPOTrainer:
         except Exception as e:
             print(f"Warning: Could not set total_training_steps in config. Structure missing? Error: {e}")
 
+    def _convert_to_json_serializable(self, obj):
+        """Convert numpy types and other non-JSON-serializable types to native Python types."""
+        if isinstance(obj, np.integer):
+            return int(obj)
+        elif isinstance(obj, np.floating):
+            return float(obj)
+        elif isinstance(obj, np.ndarray):
+            return obj.tolist()
+        elif isinstance(obj, dict):
+            return {k: self._convert_to_json_serializable(v) for k, v in obj.items()}
+        elif isinstance(obj, (list, tuple)):
+            return [self._convert_to_json_serializable(item) for item in obj]
+        else:
+            return obj
+
     def _dump_generations(self, inputs, outputs, gts, scores, reward_extra_infos_dict, dump_path):
         """Dump rollout/validation samples as JSONL."""
         os.makedirs(dump_path, exist_ok=True)
@@ -406,6 +421,8 @@ class RayPPOTrainer:
         lines = []
         for i in range(n):
             entry = {k: v[i] for k, v in base_data.items()}
+            # Convert numpy types to native Python types before JSON serialization
+            entry = self._convert_to_json_serializable(entry)
             lines.append(json.dumps(entry, ensure_ascii=False))
 
         with open(filename, "w") as f:
@@ -625,6 +642,46 @@ class RayPPOTrainer:
             }
         data_sources = np.concatenate(data_source_lst, axis=0)
         return self._val_metrics_update(data_sources, sample_uids, reward_extra_infos_dict, sample_turns)
+
+    def _compute_train_aux_metrics(self, reward_extra_infos_dict: dict[str, list]) -> dict[str, float]:
+        """Compute training auxiliary metrics from reward_extra_infos_dict.
+        
+        Args:
+            reward_extra_infos_dict: Dictionary mapping metric names to lists of values.
+            
+        Returns:
+            Dictionary of metrics with "train_aux/" prefix.
+        """
+        if not reward_extra_infos_dict:
+            return {}
+        
+        metrics = {}
+        for key, values in reward_extra_infos_dict.items():
+            if not values:
+                continue
+            
+            # Filter out None values and convert to numpy array
+            filtered_values = [v for v in values if v is not None]
+            if not filtered_values:
+                continue
+            
+            try:
+                values_array = np.array(filtered_values, dtype=np.float64)
+            except (ValueError, TypeError):
+                # Skip if values cannot be converted to numeric
+                continue
+            
+            # Skip if array is empty or contains invalid values
+            if values_array.size == 0 or np.any(np.isnan(values_array)):
+                continue
+            
+            # Compute statistics
+            metrics[f"train_aux/{key}/mean"] = float(np.mean(values_array))
+            metrics[f"train_aux/{key}/std"] = float(np.std(values_array))
+            metrics[f"train_aux/{key}/max"] = float(np.max(values_array))
+            metrics[f"train_aux/{key}/min"] = float(np.min(values_array))
+        
+        return metrics
 
     def _val_metrics_update(self, data_sources, sample_uids, reward_extra_infos_dict, sample_turns):
         data_src2var2metric2val = process_validation_metrics(data_sources, sample_uids, reward_extra_infos_dict)
@@ -1584,6 +1641,23 @@ class RayPPOTrainer:
                 gradient_norm = metrics.get("actor/grad_norm", None)
                 metrics.update(compute_variance_proxy_metrics(batch=batch, gradient_norm=gradient_norm))
                 # Note: mismatch metrics (KL, PPL, etc.) are collected at line 1179 after advantage computation
+                
+                # compute training auxiliary metrics from reward_extra_infos_dict
+                # Extract reward_extra_infos_dict from batch.non_tensor_batch if available
+                reward_extra_keys = batch.meta_info.get("reward_extra_keys", [])
+                if reward_extra_keys:
+                    reward_extra_infos_dict = {}
+                    for key in reward_extra_keys:
+                        if key in batch.non_tensor_batch:
+                            value = batch.non_tensor_batch[key]
+                            # Convert numpy array to list if needed for metrics computation
+                            if isinstance(value, np.ndarray):
+                                reward_extra_infos_dict[key] = value.tolist()
+                            elif isinstance(value, list):
+                                reward_extra_infos_dict[key] = value
+                    if reward_extra_infos_dict:
+                        train_aux_metrics = self._compute_train_aux_metrics(reward_extra_infos_dict)
+                        metrics.update(train_aux_metrics)
 
                 # this is experimental and may be changed/removed in the future in favor of a general-purpose one
                 if isinstance(self.train_dataloader.sampler, AbstractCurriculumSampler):
