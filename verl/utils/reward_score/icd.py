@@ -130,21 +130,41 @@ def compute_accuracy_score(solution_str, ground_truth):
             break
     return round(matched_length / total_length, 2)
 
-def compute_language_score(solution_str, ground_truth):
-    """Compute the language score for the solution string.
-    
-    Args:
-        solution_str: the solution text from the model
-        ground_truth: the ground truth ICD code. Can be a string (e.g., "E11.9") or list of strings
-        
-    Returns:
-        float: The computed language score
+import re
+
+def compute_language_score(solution_str, ground_truth=None):
     """
+    Compute the language score for the solution string.
+
+    The score represents the proportion of English alphabetic characters
+    among all alphabetic characters (ignoring spaces, numbers, punctuation).
+
+    Args:
+        solution_str (str): The solution text from the model.
+        ground_truth: Unused (kept for compatibility).
+
+    Returns:
+        float: Score between 0.0 and 1.0
+    """
+    if not solution_str:
+        return 0.0
+
+    # Remove HTML, LaTeX, and math expressions
     clean_text = re.sub(r'<.*?>|\$.*?\$|\\\[.*?\\\]', '', solution_str, flags=re.DOTALL)
-    total_length = len(clean_text)
-    english_chars = len(re.findall(r'[a-zA-Z]', clean_text))
-    non_english_chars = total_length - english_chars
-    return -round(non_english_chars / total_length, 2)
+
+    # Keep only alphabetic characters (ignore spaces, digits, punctuation)
+    letters = re.findall(r'[A-Za-z]', clean_text)
+    all_alpha = re.findall(r'[^\W\d_]', clean_text, flags=re.UNICODE)
+
+    total_alpha = len(all_alpha)
+
+    if total_alpha == 0:
+        return 0.0
+
+    english_letters = len(letters)
+
+    return round(english_letters / total_alpha, 2)
+
 
 def compute_score(data_source, solution_str, ground_truth, extra_info=None):
     """The scoring function for ICD coding datasets.
