@@ -110,7 +110,7 @@ def compute_length_score(solution_str, ground_truth):
     else:
         return -1.0
 
-def compute_accuracy_score(solution_str, ground_truth):
+def compute_accuracy_score(solution_str, ground_truth, method="strict"):
     """Compute the accuracy score for the solution string.
     
     Args:
@@ -121,6 +121,8 @@ def compute_accuracy_score(solution_str, ground_truth):
         float: The computed accuracy score
     """
     extracted_code = extract_solution(solution_str)
+    if method == "strict":
+        return int(extracted_code == ground_truth)
     total_length = max(len(extracted_code), len(ground_truth))
     matched_length = 0
     for c1, c2 in zip(extracted_code, ground_truth):
@@ -190,4 +192,5 @@ def compute_score(data_source, solution_str, ground_truth, extra_info=None):
         scores[key] = func(solution_str, ground_truth)
 
     scores["score"] = sum(scores.values())
+    scores["reward/accuracy_score_strict"] = compute_accuracy_score(solution_str, ground_truth, method="strict")
     return scores
