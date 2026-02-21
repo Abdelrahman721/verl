@@ -8,7 +8,7 @@ PROJECT_NAME="MedQA-RL"
 EXP_NAME="llm_judge_grpo"
 
 MAX_PROMPT_LEN=512
-MAX_RESPONSE_LEN=4096
+MAX_RESPONSE_LEN=8192
 
 TEMP=1.0
 TOP_P=1.0
@@ -27,7 +27,7 @@ ROLLOUT_IS_THRESHOLD=2.0
 FILTER_METRIC="seq_reward"
 MAX_NUM_GEN_BATCHES=10
 
-export WANDB_API_KEY="7eadd40652b0651b0f12dc86ea4d5fde56db2e2a"
+export WANDB_API_KEY="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"
 
 python3 -m verl.trainer.main_ppo \
   algorithm.adv_estimator=grpo \
