@@ -53,7 +53,7 @@ def build_dataset(items: list[dict], split: str = "train") -> list[dict]:
         row = {
             "data_source": "medical_qa",
             "prompt": [
-                {"role": "system", "content": SYSTEM_PROMPT},
+                # {"role": "system", "content": SYSTEM_PROMPT},
                 {"role": "user", "content": item["question"]},
             ],
             "ability": "medical_qa",
@@ -67,6 +67,7 @@ def build_dataset(items: list[dict], split: str = "train") -> list[dict]:
             "extra_info": {
                 "split": split,
                 "index": idx,
+                "question": item["question"],
                 "title": item["title"],
                 "source_file": item["source_file"],
                 "quiz_index": item["quiz_index"],

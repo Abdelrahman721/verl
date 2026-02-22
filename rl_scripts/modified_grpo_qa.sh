@@ -15,8 +15,8 @@ TOP_P=1.0
 
 N_SAMPLES_PER_PROMPT=8
 
-TRAIN_BATCH_SIZE=64
-GEN_BATCH_SIZE=192
+TRAIN_BATCH_SIZE=2
+GEN_BATCH_SIZE=6
 
 CLIP_LOW=0.2
 CLIP_HIGH=0.28
@@ -74,18 +74,16 @@ python3 -m verl.trainer.main_ppo \
   \
   actor_rollout_ref.actor.ppo_epochs=1 \
   actor_rollout_ref.actor.ppo_mini_batch_size="${TRAIN_BATCH_SIZE}" \
-  actor_rollout_ref.actor.ppo_micro_batch_size_per_gpu=8 \
+  actor_rollout_ref.actor.ppo_micro_batch_size_per_gpu=2 \
   actor_rollout_ref.actor.optim.lr=1e-6 \
   actor_rollout_ref.actor.entropy_coeff=0 \
   \
-  actor_rollout_ref.rollout.log_prob_micro_batch_size_per_gpu=8 \
+  actor_rollout_ref.rollout.log_prob_micro_batch_size_per_gpu=2 \
   actor_rollout_ref.rollout.temperature="${TEMP}" \
   actor_rollout_ref.rollout.top_p="${TOP_P}" \
-  actor_rollout_ref.ref.log_prob_micro_batch_size_per_gpu=8 \
+  actor_rollout_ref.ref.log_prob_micro_batch_size_per_gpu=2 \
   actor_rollout_ref.ref.fsdp_config.param_offload=True \
   actor_rollout_ref.rollout.tensor_model_parallel_size=2 \
-  actor_rollout_ref.rollout.max_num_batched_tokens=32768 \
-  actor_rollout_ref.rollout.max_num_seqs=512 \
   \
   custom_reward_function.path="/workspace/verl/verl/utils/reward_score/qa.py" \
   custom_reward_function.name="compute_score" \

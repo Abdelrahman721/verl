@@ -42,7 +42,7 @@ def _get_grader_client():
     return _GPT_CLIENT
 
 
-GRADING_MODEL = os.environ.get("QA_GRADING_MODEL", "gpt-5")
+GRADING_MODEL = os.environ.get("QA_GRADING_MODEL", "gpt-5.1")
 
 GRADING_SYSTEM_PROMPT = (
     "You are an expert medical evaluator. Score how well an answer meets "
@@ -138,7 +138,8 @@ async def _call_grader(
 ) -> list[int]:
     if not answer or not criteria:
         return []
-
+    
+    criteria += ["The answer does not contain hallucinations, is easy, concise, and well written"]
     criteria_text = "\n".join(f"{i+1}. {c}" for i, c in enumerate(criteria))
     prompt = GRADING_USER_TEMPLATE.format(
         question=question, gold=gold, answer=answer, criteria=criteria_text
@@ -147,15 +148,14 @@ async def _call_grader(
 
     for attempt in range(max_retries):
         try:
-            resp = await client.chat.completions.create(
+            resp = await client.responses.create(
                 model=GRADING_MODEL,
-                messages=[
-                    {"role": "system", "content": GRADING_SYSTEM_PROMPT},
-                    {"role": "user", "content": prompt},
-                ],
-                max_completion_tokens=2048,
+                instructions=GRADING_SYSTEM_PROMPT,
+                input=prompt,
+                reasoning={"effort": "low"},
+                max_output_tokens=2048,
             )
-            scores = _parse_scores(resp.choices[0].message.content, len(criteria))
+            scores = _parse_scores(resp.output_text, len(criteria))
             if scores:
                 return scores
         except Exception as e:
