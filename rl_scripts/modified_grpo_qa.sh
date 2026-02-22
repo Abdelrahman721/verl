@@ -1,6 +1,6 @@
 set -x
 
-MODEL_PATH="Qwen/Qwen3-4B-Base"
+MODEL_PATH="base"
 TRAIN_FILES="/workspace/verl/data/medical_qa/train.parquet"
 VAL_FILES="/workspace/verl/data/medical_qa/val.parquet"
 
