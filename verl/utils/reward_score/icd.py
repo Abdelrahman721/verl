@@ -98,18 +98,20 @@ def compute_length_score(solution_str, ground_truth):
     Returns:
         float: The computed length score
     """
-    return 0.0
-    # total_length = len(solution_str.split())
-    # if total_length < 32:
-    #     return -1.0
-    # elif total_length < 64:
-    #     return -0.5
-    # elif total_length < 128:
-    #     return 0.0
-    # elif total_length < 256:
-    #     return -0.5
-    # else:
-    #     return -1.0
+    # return 0.0
+    total_length = len(solution_str.split())
+    if total_length < 64:
+        return -1.0
+    elif total_length < 128:
+        return -0.75
+    elif total_length < 256:
+        return -0.5
+    elif total_length < 512:
+        return -0.25
+    elif total_length < 1024:
+        return 0.0
+    else:
+        return -1.0
 
 def compute_accuracy_score(solution_str, ground_truth, method="relaxed"):
     """Compute the accuracy score for the solution string.
