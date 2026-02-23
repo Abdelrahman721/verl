@@ -96,7 +96,7 @@ python3 -m verl.trainer.main_ppo \
   trainer.n_gpus_per_node=2 \
   trainer.save_freq=40 \
   trainer.test_freq=20 \
-  trainer.total_epochs=4 \
+  trainer.total_epochs=1 \
   trainer.rollout_data_dir=$HOME/verl_dumps/rollouts \
   trainer.validation_data_dir=$HOME/verl_dumps/val \
   "$@"
