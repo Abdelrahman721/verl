@@ -139,7 +139,7 @@ async def _call_grader(
     if not answer or not criteria:
         return []
     
-    criteria += ["The answer does not contain hallucinations, is easy, concise, and well written"]
+    criteria += ["Use the ground truth as a reference to judge this: The candidate answer does not contain any hallucinations, is concise but thorough, and is very well written."]
     criteria_text = "\n".join(f"{i+1}. {c}" for i, c in enumerate(criteria))
     prompt = GRADING_USER_TEMPLATE.format(
         question=question, gold=gold, answer=answer, criteria=criteria_text
