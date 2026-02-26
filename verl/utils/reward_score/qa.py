@@ -324,6 +324,13 @@ def compute_score(data_source, solution_str, ground_truth, extra_info=None):
     extracted = _extract_answer(solution_str)
     answer_to_grade = extracted if extracted else ""
 
+    # Compute reasoning/answer lengths (informational only, not used in reward)
+    _think_match = re.search(
+        rf"{re.escape(THINKING_START)}(.+?){re.escape(THINKING_END)}", solution_str, re.DOTALL
+    )
+    reasoning_length = len(_think_match.group(1).split()) if _think_match else 0
+    answer_length = len(answer_to_grade.split()) if answer_to_grade else 0
+
     # Format score (penalty only)
     format_score = _compute_format_score(solution_str)
 
@@ -363,6 +370,8 @@ def compute_score(data_source, solution_str, ground_truth, extra_info=None):
         "reward/hallucination_penalty": hallucination_penalty,
         "reward/format_score": format_score,
         "reward/brevity_score": brevity_score,
+        "reward/reasoning_length": reasoning_length,
+        "reward/answer_length": answer_length,
     }
     # Multiplicative scoring: penalties scale WITH accuracy.
     # A verbose/hallucinating answer can't score high just by hitting criteria.
