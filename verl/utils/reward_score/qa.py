@@ -9,12 +9,12 @@ It returns a dict with individual score components and a combined "score" key.
 
 Expected model format: <think>reasoning</think> then the answer directly after.
 
-Reward structure:
+Reward structure (multiplicative — penalties scale with accuracy):
     - accuracy_score: 0.0 to 1.0 (binary per-criterion recall, fraction met)
     - hallucination_penalty: -0.5 to 0.0 (precision, penalizes incorrect claims)
     - format_score: -0.5 to 0.0 (penalty only, no bonus for correct format)
-    - length_penalty: -0.3 to 0.0 (penalizes answer bloat relative to gold answer)
-    - score: combined total (the value verl uses for RL)
+    - brevity_bonus: 0.0 to 0.1 (small bonus for concise answers near gold length)
+    - score: accuracy * max(0.1, 1 + hallucination + brevity) + format
 """
 
 import asyncio
@@ -53,8 +53,13 @@ GRADING_SYSTEM_PROMPT = (
     "For each criterion, respond with 0 or 1:\n"
     "1 = The answer explicitly and correctly states this specific fact or concept\n"
     "0 = The answer does not state this, states it incorrectly, or only vaguely alludes to it\n"
-    "Be strict. Vaguely related content without the specific fact is 0. "
-    "Only clear, correct statements count as 1.\n"
+    "Be strict. Apply these rules:\n"
+    "- Vaguely related content without the specific fact is 0.\n"
+    "- Hedging (e.g. 'it may be X or Y', 'possibly', 'could be') without "
+    "committing to the correct specific answer is 0.\n"
+    "- Burying the correct fact inside excessive irrelevant text does not count — "
+    "the fact must be clearly stated, not hidden in a wall of text.\n"
+    "- Only clear, correct, committed statements count as 1.\n"
     "Respond with ONLY comma-separated 0 or 1 values, one per criterion. "
     "Nothing else. Example for 3 criteria: 1,0,1"
 )
@@ -123,16 +128,20 @@ def _compute_format_score(response: str) -> float:
 
 
 # ============================================================================
-# LENGTH PENALTY — relative to gold answer, applied to answer only
+# BREVITY SCORING — reward conciseness, penalize bloat
 # ============================================================================
-def _compute_length_penalty(answer_text: str, gold_answer: str) -> float:
+def _compute_brevity_score(answer_text: str, gold_answer: str) -> float:
     """
-    Penalize answer length that significantly exceeds the gold answer.
+    Brevity score that rewards concise answers and penalizes verbose ones.
 
-    Tolerance: up to 1.5x the gold answer length is free.
-    Beyond that: linear penalty of -0.1 per 1x excess, capped at -0.3.
+    This is used multiplicatively with accuracy, so verbose answers
+    get their accuracy scaled down — you can't brute-force criteria hits
+    by dumping text.
 
-    Only applied to the answer portion (after </think>), not reasoning.
+    Returns:
+        +0.1  if answer is within 0.5x-1.5x gold length (concise bonus)
+         0.0  at 2x gold length
+        -0.2  per 1x excess beyond 2x, uncapped
     """
     if not answer_text or not gold_answer:
         return 0.0
@@ -141,14 +150,14 @@ def _compute_length_penalty(answer_text: str, gold_answer: str) -> float:
     gold_words = max(len(gold_answer.split()), 1)
 
     ratio = answer_words / gold_words
-    tolerance = 1.5
 
-    if ratio <= tolerance:
-        return 0.0
-
-    excess = ratio - tolerance
-    penalty = -0.1 * excess
-    return max(penalty, -0.3)
+    if 0.5 <= ratio <= 1.5:
+        return 0.1  # concise bonus
+    elif ratio <= 2.0:
+        return 0.0  # neutral zone
+    else:
+        excess = ratio - 2.0
+        return -0.2 * excess  # no cap — 10x answer gets -1.6
 
 
 # ============================================================================
@@ -170,7 +179,7 @@ async def _call_grader(
     if not answer or not criteria:
         return []
 
-    criteria_text = "\n".join(f"{i+1}. {c}" for i, c in enumerate(criteria))
+    criteria_text = "\n".join(f"{i + 1}. {c}" for i, c in enumerate(criteria))
     prompt = GRADING_USER_TEMPLATE.format(
         question=question, gold=gold, answer=answer, criteria=criteria_text
     )
@@ -182,7 +191,6 @@ async def _call_grader(
                 model=GRADING_MODEL,
                 instructions=GRADING_SYSTEM_PROMPT,
                 input=prompt,
-                reasoning={"effort": "low"},
                 max_output_tokens=2048,
             )
             scores = _parse_scores(resp.output_text, len(criteria))
@@ -252,7 +260,6 @@ async def _call_hallucination_check(
                 model=GRADING_MODEL,
                 instructions=HALLUCINATION_SYSTEM_PROMPT,
                 input=prompt,
-                reasoning={"effort": "low"},
                 max_output_tokens=2048,
             )
             numbers = re.findall(r"\b(\d+)\b", resp.output_text.strip())
@@ -297,7 +304,7 @@ def compute_score(data_source, solution_str, ground_truth, extra_info=None):
             "reward/accuracy_score": binary recall (0.0-1.0)
             "reward/hallucination_penalty": precision penalty (-0.5 to 0.0)
             "reward/format_score": format penalty (-0.5 to 0.0)
-            "reward/length_penalty": length penalty (-0.3 to 0.0)
+            "reward/brevity_score": brevity bonus/penalty (+0.1 to uncapped negative)
     """
     # Parse ground_truth - handle both dict and JSON string
     if isinstance(ground_truth, str):
@@ -312,14 +319,16 @@ def compute_score(data_source, solution_str, ground_truth, extra_info=None):
         question = extra_info.get("question", "")
 
     # Extract answer: everything after </think>
+    # If format is broken (no </think>), grade empty string — don't reward
+    # the model for leaking thinking into the answer.
     extracted = _extract_answer(solution_str)
-    answer_to_grade = extracted if extracted else solution_str
+    answer_to_grade = extracted if extracted else ""
 
     # Format score (penalty only)
     format_score = _compute_format_score(solution_str)
 
-    # Length penalty (on answer only, relative to gold)
-    length_penalty = _compute_length_penalty(answer_to_grade, gold_answer)
+    # Brevity score (on answer only, relative to gold)
+    brevity_score = _compute_brevity_score(answer_to_grade, gold_answer)
 
     # Run both LLM calls concurrently: accuracy (recall) + hallucination (precision)
     async def _run_grading():
@@ -335,6 +344,7 @@ def compute_score(data_source, solution_str, ground_truth, extra_info=None):
 
         if loop and loop.is_running():
             import concurrent.futures
+
             with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
                 llm_scores, num_hallucinations = pool.submit(
                     asyncio.run, _run_grading()
@@ -352,7 +362,11 @@ def compute_score(data_source, solution_str, ground_truth, extra_info=None):
         "reward/accuracy_score": accuracy_score,
         "reward/hallucination_penalty": hallucination_penalty,
         "reward/format_score": format_score,
-        "reward/length_penalty": length_penalty,
+        "reward/brevity_score": brevity_score,
     }
-    scores["score"] = sum(scores.values())
+    # Multiplicative scoring: penalties scale WITH accuracy.
+    # A verbose/hallucinating answer can't score high just by hitting criteria.
+    # score = accuracy * max(0.1, 1 + hallucination + brevity) + format
+    quality_multiplier = max(0.1, 1.0 + hallucination_penalty + brevity_score)
+    scores["score"] = accuracy_score * quality_multiplier + format_score
     return scores

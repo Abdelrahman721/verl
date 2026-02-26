@@ -66,8 +66,9 @@ python3 -m verl.trainer.main_ppo \
   \
   actor_rollout_ref.actor.loss_agg_mode="token-mean" \
   \
-  actor_rollout_ref.actor.use_kl_loss=False \
-  algorithm.use_kl_in_reward=False \
+  actor_rollout_ref.actor.use_kl_loss=True \
+  actor_rollout_ref.actor.kl_loss_coef=0.03 \
+  algorithm.use_kl_in_reward=True \
   \
   actor_rollout_ref.actor.clip_ratio_low="${CLIP_LOW}" \
   actor_rollout_ref.actor.clip_ratio_high="${CLIP_HIGH}" \
