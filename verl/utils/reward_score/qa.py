@@ -152,7 +152,6 @@ async def _call_judge(question: str, gold: str, answer: str, max_retries: int = 
                 instructions=JUDGE_SYSTEM_PROMPT,
                 reasoning={"effort": "low"},
                 input=prompt,
-                max_output_tokens=8,
             )
             letter = resp.output_text.strip().upper()
             # Extract first valid grade letter
