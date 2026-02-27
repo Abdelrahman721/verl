@@ -9,12 +9,16 @@ It returns a dict with individual score components and a combined "score" key.
 
 Expected model format: <think>reasoning</think> then the answer directly after.
 
-Reward structure (multiplicative — penalties scale with accuracy):
-    - accuracy_score: 0.0 to 1.0 (binary per-criterion recall, fraction met)
-    - hallucination_penalty: -0.5 to 0.0 (precision, penalizes incorrect claims)
+Reward structure:
+    - judge_score: 0.0 to 1.0 (single LLM call, holistic 5-category rating)
     - format_score: -0.5 to 0.0 (penalty only, no bonus for correct format)
-    - brevity_bonus: 0.0 to 0.1 (small bonus for concise answers near gold length)
-    - score: accuracy * max(0.1, 1 + hallucination + brevity) + format
+    - score: judge_score + format_score
+
+LLM judge categories (mapped to rewards):
+    A (Excellent)  → 1.0  — correct, complete, concise, may exceed gold
+    B (Good)       → 0.5  — correct on main points, minor gaps or verbosity
+    C (Partial)    → 0.2  — partially correct, significant gaps or errors
+    D (Fail)       → 0.0  — wrong, irrelevant, or harmful
 """
 
 import asyncio
@@ -31,12 +35,12 @@ THINKING_START = "<think>"
 THINKING_END = "</think>"
 
 # ============================================================================
-# LLM GRADER CONFIG
+# LLM JUDGE CONFIG
 # ============================================================================
 _GPT_CLIENT = None
 
 
-def _get_grader_client():
+def _get_judge_client():
     global _GPT_CLIENT
     if _GPT_CLIENT is None:
         api_key = os.environ.get("OPENAI_API_KEY", "")
@@ -44,40 +48,43 @@ def _get_grader_client():
     return _GPT_CLIENT
 
 
-GRADING_MODEL = os.environ.get("QA_GRADING_MODEL", "gpt-5.1")
+JUDGE_MODEL = os.environ.get("QA_GRADING_MODEL", "gpt-5.1")
 
-GRADING_SYSTEM_PROMPT = (
-    "You are an expert medical evaluator. For each criterion below, "
-    "determine whether the candidate answer contains the specific "
-    "information described, compared to the gold standard.\n"
-    "For each criterion, respond with 0 or 1:\n"
-    "1 = The answer explicitly and correctly states this specific fact or concept\n"
-    "0 = The answer does not state this, states it incorrectly, or only vaguely alludes to it\n"
-    "Be strict. Apply these rules:\n"
-    "- Vaguely related content without the specific fact is 0.\n"
-    "- Hedging (e.g. 'it may be X or Y', 'possibly', 'could be') without "
-    "committing to the correct specific answer is 0.\n"
-    "- Burying the correct fact inside excessive irrelevant text does not count — "
-    "the fact must be clearly stated, not hidden in a wall of text.\n"
-    "- Only clear, correct, committed statements count as 1.\n"
-    "Respond with ONLY comma-separated 0 or 1 values, one per criterion. "
-    "Nothing else. Example for 3 criteria: 1,0,1"
+JUDGE_SYSTEM_PROMPT = (
+    "You are an expert medical examiner grading a student's answer.\n"
+    "You will receive a question, the gold standard answer, and the student's answer.\n"
+    "Grade the student's answer into exactly one category:\n\n"
+    "A — Excellent: The answer is correct, complete, well-written, and concise. "
+    "It covers all key points from the gold answer (or even adds correct detail "
+    "beyond it). No significant errors.\n\n"
+    "B — Good: The answer is correct on the main points and mostly complete, "
+    "but has minor gaps, slight verbosity, or small imprecisions that don't "
+    "change clinical meaning.\n\n"
+    "C — Partial: The answer is partially correct but has significant gaps, "
+    "missing key information, excessive verbosity, or notable inaccuracies.\n\n"
+    "D — Fail: The answer is wrong, irrelevant, severely incomplete, contradicts "
+    "the gold standard, or could be harmful.\n\n"
+    "Respond with ONLY a single letter: A, B, C, or D. Nothing else."
 )
 
-GRADING_USER_TEMPLATE = """
-QUESTION:
+JUDGE_USER_TEMPLATE = """QUESTION:
 {question}
 
-GOLD ANSWER:
+GOLD STANDARD ANSWER:
 {gold}
 
-CANDIDATE ANSWER:
+STUDENT'S ANSWER:
 {answer}
 
-CRITERIA:
-{criteria}
+Grade (A/B/C/D):"""
 
-Scores (comma-separated, one per criterion):"""
+# Category → reward mapping
+GRADE_TO_SCORE = {
+    "A": 1.0,
+    "B": 0.5,
+    "C": 0.2,
+    "D": 0.0,
+}
 
 # ============================================================================
 # FORMAT SCORING — penalty only, no bonus
@@ -128,161 +135,36 @@ def _compute_format_score(response: str) -> float:
 
 
 # ============================================================================
-# BREVITY SCORING — reward conciseness, penalize bloat
+# LLM JUDGE — single holistic call
 # ============================================================================
-def _compute_brevity_score(answer_text: str, gold_answer: str) -> float:
-    """
-    Brevity score that rewards concise answers and penalizes verbose ones.
-
-    This is used multiplicatively with accuracy, so verbose answers
-    get their accuracy scaled down — you can't brute-force criteria hits
-    by dumping text.
-
-    Returns:
-        +0.1  if answer is within 0.5x-1.5x gold length (concise bonus)
-         0.0  at 2x gold length
-        -0.2  per 1x excess beyond 2x, uncapped
-    """
-    if not answer_text or not gold_answer:
-        return 0.0
-
-    answer_words = len(answer_text.split())
-    gold_words = max(len(gold_answer.split()), 1)
-
-    ratio = answer_words / gold_words
-
-    if 0.5 <= ratio <= 1.5:
-        return 0.1  # concise bonus
-    elif ratio <= 2.0:
-        return 0.0  # neutral zone
-    else:
-        excess = ratio - 2.0
-        return -0.2 * excess  # no cap — 10x answer gets -1.6
-
-
-# ============================================================================
-# LLM GRADING — binary per-criterion
-# ============================================================================
-def _parse_scores(text: str, expected: int) -> list[int]:
-    """Parse comma-separated binary scores (0 or 1) from grader response."""
-    if not text:
-        return []
-    numbers = re.findall(r"\b([01])\b", text.strip())
-    if len(numbers) >= expected:
-        return [int(n) for n in numbers[:expected]]
-    return []
-
-
-async def _call_grader(
-    question: str, gold: str, answer: str, criteria: list[str], max_retries: int = 3
-) -> list[int]:
-    if not answer or not criteria:
-        return []
-
-    criteria_text = "\n".join(f"{i + 1}. {c}" for i, c in enumerate(criteria))
-    prompt = GRADING_USER_TEMPLATE.format(
-        question=question, gold=gold, answer=answer, criteria=criteria_text
-    )
-    client = _get_grader_client()
-
-    for attempt in range(max_retries):
-        try:
-            resp = await client.responses.create(
-                model=GRADING_MODEL,
-                instructions=GRADING_SYSTEM_PROMPT,
-                input=prompt,
-                max_output_tokens=2048,
-            )
-            scores = _parse_scores(resp.output_text, len(criteria))
-            if scores:
-                return scores
-        except Exception as e:
-            if attempt == max_retries - 1:
-                print(f"[QA REWARD] GPT grading failed: {e}")
-                return []
-            await asyncio.sleep(0.5 * (attempt + 1))
-    return []
-
-
-def _accuracy_from_scores(scores: list[int], num_criteria: int) -> float:
-    """Fraction of criteria met: 0.0 to 1.0."""
-    if not scores or num_criteria == 0:
-        return 0.0
-    return sum(scores) / num_criteria
-
-
-# ============================================================================
-# HALLUCINATION CHECK — precision penalty
-# ============================================================================
-HALLUCINATION_SYSTEM_PROMPT = (
-    "You are an expert medical fact-checker. Your job is to count factually "
-    "incorrect medical claims in the candidate answer.\n"
-    "Compare the candidate answer against the gold standard answer and "
-    "established medical knowledge.\n"
-    "Count ONLY clear factual errors — wrong drug names, wrong mechanisms, "
-    "wrong anatomy, incorrect numbers/thresholds, reversed relationships, "
-    "or fabricated claims. Do NOT count:\n"
-    "- Omissions (missing information is not a hallucination)\n"
-    "- Stylistic issues or vague language\n"
-    "- Minor imprecisions that don't change clinical meaning\n"
-    "Respond with ONLY a single integer: the number of factual errors found. "
-    "If there are no errors, respond with 0."
-)
-
-HALLUCINATION_USER_TEMPLATE = """
-QUESTION:
-{question}
-
-GOLD ANSWER:
-{gold}
-
-CANDIDATE ANSWER:
-{answer}
-
-Number of factual errors:"""
-
-
-async def _call_hallucination_check(
-    question: str, gold: str, answer: str, max_retries: int = 3
-) -> int:
-    """Count factual errors in the answer. Returns an integer >= 0."""
+async def _call_judge(question: str, gold: str, answer: str, max_retries: int = 3) -> str:
+    """Ask the LLM judge to grade the answer. Returns a single letter grade."""
     if not answer:
-        return 0
+        return "D"
 
-    prompt = HALLUCINATION_USER_TEMPLATE.format(
-        question=question, gold=gold, answer=answer
-    )
-    client = _get_grader_client()
+    prompt = JUDGE_USER_TEMPLATE.format(question=question, gold=gold, answer=answer)
+    client = _get_judge_client()
 
     for attempt in range(max_retries):
         try:
             resp = await client.responses.create(
-                model=GRADING_MODEL,
-                instructions=HALLUCINATION_SYSTEM_PROMPT,
+                model=JUDGE_MODEL,
+                instructions=JUDGE_SYSTEM_PROMPT,
+                reasoning={"effort": "low"},
                 input=prompt,
-                max_output_tokens=2048,
+                max_output_tokens=8,
             )
-            numbers = re.findall(r"\b(\d+)\b", resp.output_text.strip())
-            if numbers:
-                return int(numbers[0])
+            letter = resp.output_text.strip().upper()
+            # Extract first valid grade letter
+            for ch in letter:
+                if ch in GRADE_TO_SCORE:
+                    return ch
         except Exception as e:
             if attempt == max_retries - 1:
-                print(f"[QA REWARD] Hallucination check failed: {e}")
-                return 0
+                print(f"[QA REWARD] LLM judge failed: {e}")
+                return "D"
             await asyncio.sleep(0.5 * (attempt + 1))
-    return 0
-
-
-def _compute_hallucination_penalty(num_errors: int) -> float:
-    """
-    Convert hallucination count to a penalty.
-
-    -0.1 per factual error, capped at -0.5.
-    0 errors = 0.0 (no penalty).
-    """
-    if num_errors <= 0:
-        return 0.0
-    return max(-0.1 * num_errors, -0.5)
+    return "D"
 
 
 # ============================================================================
@@ -301,17 +183,15 @@ def compute_score(data_source, solution_str, ground_truth, extra_info=None):
     Returns:
         dict with keys:
             "score": combined reward (float)
-            "reward/accuracy_score": binary recall (0.0-1.0)
-            "reward/hallucination_penalty": precision penalty (-0.5 to 0.0)
+            "reward/judge_score": holistic LLM grade (0.0-1.0)
+            "reward/judge_grade": letter grade (A/B/C/D/F)
             "reward/format_score": format penalty (-0.5 to 0.0)
-            "reward/brevity_score": brevity bonus/penalty (+0.1 to uncapped negative)
     """
     # Parse ground_truth - handle both dict and JSON string
     if isinstance(ground_truth, str):
         ground_truth = json.loads(ground_truth)
 
     gold_answer = ground_truth.get("gold_answer", "")
-    criteria = ground_truth.get("criteria", [])
 
     # Extract question from extra_info if available
     question = ""
@@ -324,26 +204,11 @@ def compute_score(data_source, solution_str, ground_truth, extra_info=None):
     extracted = _extract_answer(solution_str)
     answer_to_grade = extracted if extracted else ""
 
-    # Compute reasoning/answer lengths (informational only, not used in reward)
-    _think_match = re.search(
-        rf"{re.escape(THINKING_START)}(.+?){re.escape(THINKING_END)}", solution_str, re.DOTALL
-    )
-    reasoning_length = len(_think_match.group(1).split()) if _think_match else 0
-    answer_length = len(answer_to_grade.split()) if answer_to_grade else 0
-
     # Format score (penalty only)
     format_score = _compute_format_score(solution_str)
 
-    # Brevity score (on answer only, relative to gold)
-    brevity_score = _compute_brevity_score(answer_to_grade, gold_answer)
-
-    # Run both LLM calls concurrently: accuracy (recall) + hallucination (precision)
-    async def _run_grading():
-        acc_task = _call_grader(question, gold_answer, answer_to_grade, criteria)
-        hal_task = _call_hallucination_check(question, gold_answer, answer_to_grade)
-        return await asyncio.gather(acc_task, hal_task)
-
-    if gold_answer and criteria:
+    # LLM judge — single holistic call
+    if gold_answer:
         try:
             loop = asyncio.get_running_loop()
         except RuntimeError:
@@ -353,29 +218,30 @@ def compute_score(data_source, solution_str, ground_truth, extra_info=None):
             import concurrent.futures
 
             with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-                llm_scores, num_hallucinations = pool.submit(
-                    asyncio.run, _run_grading()
-                ).result()
+                grade = pool.submit(asyncio.run, _call_judge(question, gold_answer, answer_to_grade)).result()
         else:
-            llm_scores, num_hallucinations = asyncio.run(_run_grading())
+            grade = asyncio.run(_call_judge(question, gold_answer, answer_to_grade))
 
-        accuracy_score = _accuracy_from_scores(llm_scores, len(criteria))
-        hallucination_penalty = _compute_hallucination_penalty(num_hallucinations)
+        judge_score = GRADE_TO_SCORE[grade]
     else:
-        accuracy_score = 0.0
-        hallucination_penalty = 0.0
+        grade = "D"
+        judge_score = 0.0
+
+    # Length stats for monitoring
+    think_match = re.search(
+        rf"{re.escape(THINKING_START)}(.+?){re.escape(THINKING_END)}",
+        solution_str,
+        flags=re.DOTALL,
+    )
+    reasoning_len = len(think_match.group(1).split()) if think_match else 0
+    answer_len = len(answer_to_grade.split()) if answer_to_grade else 0
 
     scores = {
-        "reward/accuracy_score": accuracy_score,
-        "reward/hallucination_penalty": hallucination_penalty,
+        "reward/judge_score": judge_score,
+        "reward/judge_grade": grade,
         "reward/format_score": format_score,
-        "reward/brevity_score": brevity_score,
-        "reward/reasoning_length": reasoning_length,
-        "reward/answer_length": answer_length,
+        "reward/reasoning_length": reasoning_len,
+        "reward/answer_length": answer_len,
     }
-    # Multiplicative scoring: penalties scale WITH accuracy.
-    # A verbose/hallucinating answer can't score high just by hitting criteria.
-    # score = accuracy * max(0.1, 1 + hallucination + brevity) + format
-    quality_multiplier = max(0.1, 1.0 + hallucination_penalty + brevity_score)
-    scores["score"] = accuracy_score * quality_multiplier + format_score
+    scores["score"] = judge_score + format_score
     return scores
