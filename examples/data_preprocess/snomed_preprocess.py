@@ -10,13 +10,22 @@ import datasets
 
 
 def make_system_prompt() -> str:
-    return """A conversation between User and Assistant. The user asks a question, and the Assistant solves it. The assistant first thinks about the reasoning process in the mind and then provides the user with the answer.
+    # Must match `llm-pretrainer/convert_snomed_to_sft.py`
+    return (
+        "A conversation between User and Assistant. The user asks a question, and the Assistant solves it. "
+        "The assistant first thinks about the reasoning process in the mind and then provides the user with the answer. "
+        "The reasoning process and answer are enclosed within <think>...</think> and <answer>...</answer> tags, "
+        "respectively, i.e., <think> reasoning process here </think> <answer> answer here </answer>."
+    )
 
-You are a medical coding assistant.
 
-Provide the SNOMED CT concept ID (SCTID) and the corresponding SNOMED description
-
-Now, analyze the following patient entry and provide your reasoning and answer.""".strip()
+def make_user_prompt(entry_text: str) -> str:
+    # Must match `llm-pretrainer/convert_snomed_to_sft.py`
+    return (
+        "You are a SNOMED CT medical coding expert. You are given a medical description and you need to code it using SNOMED CT. "
+        "You need to think step by step and provide the code and the official description of the code only.\n"
+        f"Description: '{entry_text}'"
+    )
 
 
 if __name__ == "__main__":
@@ -59,7 +68,7 @@ if __name__ == "__main__":
 
         prompt_messages = [
             {"role": "system", "content": system_prompt},
-            {"role": "user", "content": entry_text},
+            {"role": "user", "content": make_user_prompt(entry_text)},
         ]
 
         ground_truth = {
