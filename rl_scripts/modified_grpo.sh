@@ -1,11 +1,11 @@
 set -x
 
-MODEL_PATH="Qwen/Qwen3-4B-Base"
-TRAIN_FILES="$HOME/data/math/train.parquet"
-VAL_FILES="$HOME/data/math/test.parquet"
+MODEL_PATH="models/Qwen3-4B-Base-9916"
+TRAIN_FILES="$HOME/data/snomed/snomed_synthesis_dataset_set_B_train_rl.parquet"
+VAL_FILES="$HOME/data/snomed/snomed_synthesis_dataset_set_B_test.parquet"
 
 PROJECT_NAME="RL-Exps"
-EXP_NAME="grpo++"
+EXP_NAME="grpo++_setB_rl"
 
 MAX_PROMPT_LEN=512
 MAX_RESPONSE_LEN=4096
@@ -81,14 +81,14 @@ python3 -m verl.trainer.main_ppo \
   actor_rollout_ref.rollout.top_p="${TOP_P}" \
   actor_rollout_ref.ref.log_prob_micro_batch_size_per_gpu=4 \
   actor_rollout_ref.ref.fsdp_config.param_offload=True \
-  actor_rollout_ref.rollout.tensor_model_parallel_size=2 \
+  actor_rollout_ref.rollout.tensor_model_parallel_size=1 \
   \
   trainer.critic_warmup=0 \
   trainer.logger='["console","wandb"]' \
   trainer.project_name="${PROJECT_NAME}" \
   trainer.experiment_name="${EXP_NAME}" \
   trainer.nnodes=1 \
-  trainer.n_gpus_per_node=8 \
+  trainer.n_gpus_per_node=1 \
   trainer.save_freq=5 \
   trainer.test_freq=5 \
   trainer.total_epochs=1 \

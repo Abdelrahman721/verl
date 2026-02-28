@@ -24,7 +24,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--dataset_name",
         required=True,
-        help="CSV filename inside ./dataset/ directory",
+        help="CSV filename inside ./Datasets/ directory",
     )
     parser.add_argument(
         "--local_save_dir",
@@ -34,7 +34,7 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    dataset_path = os.path.join("./datasets", args.dataset_name)
+    dataset_path = os.path.join("./Datasets", args.dataset_name)
     save_dir = os.path.expanduser(args.local_save_dir)
 
     if not os.path.exists(dataset_path):
@@ -57,7 +57,10 @@ if __name__ == "__main__":
         sct_id = str(example["sct_id"]).strip()
         label = str(example["label"]).strip()
 
-        user_message = f"{system_prompt}\n\nUser: {entry_text}.\nAssistant: "
+        prompt_messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": entry_text},
+        ]
 
         ground_truth = {
             "id": f"{idx:012d}",
@@ -67,12 +70,7 @@ if __name__ == "__main__":
 
         return {
             "data_source": args.dataset_name,
-            "prompt": [
-                {
-                    "role": "user",
-                    "content": user_message,
-                }
-            ],
+            "prompt": prompt_messages,
             "ability": "medical_coding",
             "reward_model": {
                 "style": "rule",
