@@ -4,9 +4,9 @@ import os
 import torch
 from transformers import AutoConfig, AutoModelForCausalLM, AutoTokenizer
 
-ckpt_dir = "/workspace/models/checkpoint-1.85k/actor"
+ckpt_dir = "/workspace/models/rl-ckpt/actor"
 hf_config_dir = os.path.join(ckpt_dir, "huggingface")
-output_dir = "/workspace/models/checkpoint-1.85k/merged_hf"
+output_dir = "/workspace/models/rl-ckpt/merged_hf"
 
 device = "cuda:0"
 
