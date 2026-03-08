@@ -1,11 +1,11 @@
 set -x
 
-MODEL_PATH="models/Qwen3-4B-Base-9916"
-TRAIN_FILES="$HOME/data/snomed/snomed_synthesis_dataset_set_B_train_rl.parquet"
-VAL_FILES="$HOME/data/snomed/snomed_synthesis_dataset_set_B_test.parquet"
+MODEL_PATH="model/Qwen3-4B-Base-1000"
+TRAIN_FILES="$HOME/data/snomed/snomed_synthesis_gpt5_set_B1_RL.parquet"
+VAL_FILES="$HOME/data/snomed/snomed_synthesis_claude_set_B1_test.parquet"
 
 PROJECT_NAME="RL-Exps"
-EXP_NAME="grpo++_setB_rl"
+EXP_NAME="grpo++_setB1_rl"
 
 MAX_PROMPT_LEN=512
 MAX_RESPONSE_LEN=4096
@@ -15,8 +15,8 @@ TOP_P=1.0
 
 N_SAMPLES_PER_PROMPT=8
 
-TRAIN_BATCH_SIZE=64
-GEN_BATCH_SIZE=192
+TRAIN_BATCH_SIZE=32
+GEN_BATCH_SIZE=96
 
 CLIP_LOW=0.2
 CLIP_HIGH=0.28
@@ -88,10 +88,11 @@ python3 -m verl.trainer.main_ppo \
   trainer.project_name="${PROJECT_NAME}" \
   trainer.experiment_name="${EXP_NAME}" \
   trainer.nnodes=1 \
-  trainer.n_gpus_per_node=1 \
-  trainer.save_freq=5 \
-  trainer.test_freq=5 \
-  trainer.total_epochs=1 \
+  trainer.n_gpus_per_node=8 \
+  trainer.save_freq=10 \
+  trainer.test_freq=10 \
+  trainer.total_epochs=5 \
   trainer.rollout_data_dir=$HOME/verl_dumps/rollouts \
   trainer.validation_data_dir=$HOME/verl_dumps/val \
+  trainer.max_actor_ckpt_to_keep=5 \
   "$@"

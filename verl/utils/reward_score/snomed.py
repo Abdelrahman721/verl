@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import json
+import re
 import random
+
+ANSWER_TAG_PATTERN = re.compile(r"<answer>(.*?)</answer>", re.DOTALL | re.IGNORECASE)
 
 
 def compute_score(
@@ -11,10 +14,10 @@ def compute_score(
     score: float = 1.0,
 ) -> float:
     """
-    SNOMED reward:
-    - If exact sct_id string match found anywhere in solution_str -> 1.0
-    - Else if exact label string match found (case insensitive) -> 0.5
-    - Else -> 0.0
+    SNOMED reward (evaluates only text inside <answer>...</answer>):
+    - If exact sct_id string match found in answer tag content -> 1.0
+    - Else if exact label string match found in answer tag (case insensitive) -> 0.5
+    - Else or if no <answer> tag present -> 0.0
     """
     # Parse ground truth JSON produced by snomed_preprocess.py.
     # This must always be valid; if not, crash loudly instead of hiding the issue.
@@ -23,12 +26,18 @@ def compute_score(
     target_sctid = str(gt["sct_id"]).strip()
     target_label = str(gt["label"]).strip()
 
-    # Check for exact SCTID match anywhere in solution_str
-    if target_sctid in solution_str:
+    # Restrict scoring to content inside <answer>...</answer> only
+    answer_match = ANSWER_TAG_PATTERN.search(solution_str or "")
+    if not answer_match:
+        return 0.0
+    answer_text = (answer_match.group(1) or "").strip()
+
+    # Check for exact SCTID match in answer tag only
+    if target_sctid in answer_text:
         return 1.0
 
-    # Check for exact label match (case insensitive) anywhere in solution_str
-    if target_label.lower() in solution_str.lower():
+    # Check for exact label match (case insensitive) in answer tag only
+    if target_label.lower() in answer_text.lower():
         return 0.5
 
     # No match found
