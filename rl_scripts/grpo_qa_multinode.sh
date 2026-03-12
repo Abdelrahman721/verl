@@ -6,7 +6,7 @@ TRAIN_FILES="/workspace/verl/data/medical_qa_rl/train.parquet"
 VAL_FILES="/workspace/verl/data/medical_qa_rl/val.parquet"
 
 PROJECT_NAME="MedQA-RL"
-EXP_NAME="no-paraphrase-grpo-8h100"
+EXP_NAME="no-paraphrase-grpo-multinode"
 
 # ===== Sequence lengths =====
 MAX_PROMPT_LEN=512
@@ -18,10 +18,11 @@ TOP_P=1.0
 N_SAMPLES_PER_PROMPT=16
 
 # ===== Batch sizes =====
-# 16 unique prompts × 16 samples = 256 total samples per training step
-# 4934 train questions / 16 = ~308 steps per epoch
-TRAIN_BATCH_SIZE=4
-GEN_BATCH_SIZE=12
+# Multi-node: 2 nodes × 8 GPUs = 16 GPUs total
+# 8 unique prompts × 16 samples = 128 total samples per training step
+# Conservative to avoid Gemini rate limits (128 judge calls/step)
+TRAIN_BATCH_SIZE=8
+GEN_BATCH_SIZE=16
 
 # ===== PPO/GRPO clipping =====
 CLIP_LOW=0.2
@@ -39,6 +40,11 @@ MAX_NUM_GEN_BATCHES=10
 export QA_JUDGE_API_KEY="${QA_JUDGE_API_KEY}"
 export QA_JUDGE_BASE_URL="${QA_JUDGE_BASE_URL:-https://generativelanguage.googleapis.com/v1beta/openai/}"
 export QA_JUDGE_MODEL="${QA_JUDGE_MODEL:-gemini-3-flash-preview}"
+
+# ===== NCCL tuning for multi-node =====
+export NCCL_IB_DISABLE=0
+export NCCL_NET_GDR_LEVEL=2
+export NCCL_DEBUG=WARN
 
 python3 -m verl.trainer.main_ppo \
   algorithm.adv_estimator=grpo \
@@ -64,7 +70,7 @@ python3 -m verl.trainer.main_ppo \
   \
   actor_rollout_ref.rollout.n="${N_SAMPLES_PER_PROMPT}" \
   actor_rollout_ref.rollout.name=vllm \
-  actor_rollout_ref.rollout.gpu_memory_utilization=0.5 \
+  actor_rollout_ref.rollout.gpu_memory_utilization=0.8 \
   \
   actor_rollout_ref.rollout.calculate_log_probs=True \
   +algorithm.rollout_correction.rollout_is="${ROLLOUT_IS_LEVEL}" \
@@ -104,7 +110,7 @@ python3 -m verl.trainer.main_ppo \
   trainer.logger='["console","wandb"]' \
   trainer.project_name="${PROJECT_NAME}" \
   trainer.experiment_name="${EXP_NAME}" \
-  trainer.nnodes=1 \
+  trainer.nnodes=2 \
   trainer.n_gpus_per_node=8 \
   trainer.save_freq=40 \
   trainer.test_freq=20 \
