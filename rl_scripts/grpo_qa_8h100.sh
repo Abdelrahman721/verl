@@ -35,8 +35,11 @@ ROLLOUT_IS_THRESHOLD=2.0
 FILTER_METRIC="seq_reward"
 MAX_NUM_GEN_BATCHES=10
 
+# ===== WandB =====
+export WANDB_API_KEY="${WANDB_API_KEY:-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}"
+
 # ===== Gemini judge env (reward function reads these) =====
-export QA_JUDGE_API_KEY="${QA_JUDGE_API_KEY}"
+export QA_JUDGE_API_KEY="${QA_JUDGE_API_KEY:-AIzaSyAmATcYXXCcNNOU3-kcmMabf7Q_jMGVaZI}"
 export QA_JUDGE_BASE_URL="${QA_JUDGE_BASE_URL:-https://generativelanguage.googleapis.com/v1beta/openai/}"
 export QA_JUDGE_MODEL="${QA_JUDGE_MODEL:-gemini-3-flash-preview}"
 
@@ -65,6 +68,7 @@ python3 -m verl.trainer.main_ppo \
   actor_rollout_ref.rollout.n="${N_SAMPLES_PER_PROMPT}" \
   actor_rollout_ref.rollout.name=vllm \
   actor_rollout_ref.rollout.gpu_memory_utilization=0.5 \
+  actor_rollout_ref.rollout.update_weights_bucket_megabytes=4096 \
   \
   actor_rollout_ref.rollout.calculate_log_probs=True \
   +algorithm.rollout_correction.rollout_is="${ROLLOUT_IS_LEVEL}" \
