@@ -20,8 +20,8 @@ N_SAMPLES_PER_PROMPT=16
 # ===== Batch sizes =====
 # 16 unique prompts × 16 samples = 256 total samples per training step
 # 4934 train questions / 16 = ~308 steps per epoch
-TRAIN_BATCH_SIZE=16
-GEN_BATCH_SIZE=16
+TRAIN_BATCH_SIZE=4
+GEN_BATCH_SIZE=12
 
 # ===== PPO/GRPO clipping =====
 CLIP_LOW=0.2
