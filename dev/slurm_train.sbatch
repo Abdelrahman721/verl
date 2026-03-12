@@ -23,9 +23,12 @@ MODEL_DIR="/home/hazem/serve/no-paraphrase"
 
 export WANDB_API_KEY="${WANDB_API_KEY}"
 
+# Ensure cache dirs exist on the node before mounting
+mkdir -p "$HOME/.cache/huggingface" "$HOME/.cache/torch"
+
 srun \
   --container-image="${CONTAINER_IMAGE}" \
-  --container-mounts="${VERL_REPO}:/workspace/verl,${MODEL_DIR}:${MODEL_DIR},$HOME/.cache/huggingface:/root/.cache/huggingface" \
+  --container-mounts="${VERL_REPO}:/workspace/verl,${MODEL_DIR}:${MODEL_DIR},$HOME/.cache/huggingface:/root/.cache/huggingface,$HOME/.cache/torch:/root/.cache/torch" \
   --container-workdir="/workspace/verl" \
   bash -c '
     # Install verl in editable mode (fast, no-deps)
