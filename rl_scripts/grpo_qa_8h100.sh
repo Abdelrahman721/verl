@@ -64,7 +64,7 @@ python3 -m verl.trainer.main_ppo \
   \
   actor_rollout_ref.rollout.n="${N_SAMPLES_PER_PROMPT}" \
   actor_rollout_ref.rollout.name=vllm \
-  actor_rollout_ref.rollout.gpu_memory_utilization=0.6 \
+  actor_rollout_ref.rollout.gpu_memory_utilization=0.8 \
   \
   actor_rollout_ref.rollout.calculate_log_probs=True \
   +algorithm.rollout_correction.rollout_is="${ROLLOUT_IS_LEVEL}" \
