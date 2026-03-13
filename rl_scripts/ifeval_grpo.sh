@@ -1,6 +1,6 @@
 set -x
 
-MODEL_PATH="Qwen/Qwen3-4B-Base"
+MODEL_PATH="./model_merged"
 TRAIN_FILES="$HOME/data/ifeval/train.parquet"
 VAL_FILES="$HOME/data/ifeval/test.parquet"
 
@@ -9,7 +9,7 @@ EXP_NAME="ifeval-grpo++"
 
 # IF prompts can be longer than math, but responses are typically shorter
 MAX_PROMPT_LEN=1024
-MAX_RESPONSE_LEN=2048
+MAX_RESPONSE_LEN=4096
 
 TEMP=1.0
 TOP_P=1.0
