@@ -36,12 +36,12 @@ FILTER_METRIC="seq_reward"
 MAX_NUM_GEN_BATCHES=10
 
 # ===== WandB =====
-export WANDB_API_KEY="${WANDB_API_KEY:-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}"
+export WANDB_API_KEY=""
 
 # ===== Gemini judge env (reward function reads these) =====
-export QA_JUDGE_API_KEY="${QA_JUDGE_API_KEY:-AIzaSyAmATcYXXCcNNOU3-kcmMabf7Q_jMGVaZI}"
-export QA_JUDGE_BASE_URL="${QA_JUDGE_BASE_URL:-https://generativelanguage.googleapis.com/v1beta/openai/}"
-export QA_JUDGE_MODEL="${QA_JUDGE_MODEL:-gemini-3-flash-preview}"
+export QA_JUDGE_API_KEY=""
+export QA_JUDGE_BASE_URL="https://generativelanguage.googleapis.com/v1beta/openai/"
+export QA_JUDGE_MODEL="gemini-3-flash-preview"
 
 python3 -m verl.trainer.main_ppo \
   algorithm.adv_estimator=grpo \
@@ -113,6 +113,6 @@ python3 -m verl.trainer.main_ppo \
   trainer.save_freq=40 \
   trainer.test_freq=20 \
   trainer.total_epochs=1 \
-  trainer.rollout_data_dir=$HOME/verl_dumps/rollouts \
-  trainer.validation_data_dir=$HOME/verl_dumps/val \
+  trainer.rollout_data_dir=/data/hazem/verl_dumps/rollouts \
+  trainer.validation_data_dir=/data/hazem/verl_dumps/val \
   "$@"
