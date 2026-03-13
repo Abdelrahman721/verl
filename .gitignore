@@ -131,3 +131,5 @@ outputs
 
 models/
 Datasets/
+rl-data/
+verl_dumps/

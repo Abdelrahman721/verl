@@ -37,7 +37,7 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--local_save_dir",
-        default="~/data/snomed",
+        default="/workspace/verl/rl-data/",
         help="Directory to save parquet file",
     )
 

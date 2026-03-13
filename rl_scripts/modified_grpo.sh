@@ -1,8 +1,8 @@
 set -x
 
-MODEL_PATH="model/Qwen3-4B-Base-1000"
-TRAIN_FILES="$HOME/data/snomed/snomed_synthesis_gpt5_set_B1_RL.parquet"
-VAL_FILES="$HOME/data/snomed/snomed_synthesis_claude_set_B1_test.parquet"
+MODEL_PATH="models/Qwen3-4B-Base-10000"
+TRAIN_FILES="/workspace/verl/rl-data/snomed_synthesis_gemini5_set_B1_RL.parquet"
+VAL_FILES="/workspace/verl/rl-data/snomed_synthesis_claude_set_B1_test.parquet"
 
 PROJECT_NAME="RL-Exps"
 EXP_NAME="grpo++_setB1_rl"
@@ -92,7 +92,7 @@ python3 -m verl.trainer.main_ppo \
   trainer.save_freq=10 \
   trainer.test_freq=10 \
   trainer.total_epochs=5 \
-  trainer.rollout_data_dir=$HOME/verl_dumps/rollouts \
-  trainer.validation_data_dir=$HOME/verl_dumps/val \
+  trainer.rollout_data_dir=/workspace/verl/verl_dumps/rollouts \
+  trainer.validation_data_dir=/workspace/verl/verl_dumps/val \
   trainer.max_actor_ckpt_to_keep=5 \
   "$@"
