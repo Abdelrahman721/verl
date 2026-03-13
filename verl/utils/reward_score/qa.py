@@ -371,30 +371,14 @@ async def _call_judge(
 
 
 # ============================================================================
-# MAIN ENTRY POINT
+# SINGLE-SAMPLE SCORING
 # ============================================================================
-def compute_score(data_source, solution_str, ground_truth, extra_info=None):
-    """
-    Compute reward score for medical QA.
-
-    Args:
-        data_source: dataset identifier (unused but required by verl API)
-        solution_str: the model's full response text
-        ground_truth: dict with keys "gold_answer" (str) and "key_points" (list)
-        extra_info: optional dict with additional metadata (must include "question")
-
-    Returns:
-        dict with "score" (0.0-1.0) and component metrics
-    """
+def _score_single(solution_str, ground_truth, extra_info, judge_result):
+    """Build the reward dict for one sample given its judge result."""
     if isinstance(ground_truth, str):
         ground_truth = json.loads(ground_truth)
 
-    gold_answer = ground_truth.get("gold_answer", "")
     key_points = ground_truth.get("key_points", [])
-
-    question = ""
-    if extra_info and isinstance(extra_info, dict):
-        question = extra_info.get("question", "")
 
     # Extract answer after </think>
     extracted = _extract_answer(solution_str)
@@ -403,25 +387,7 @@ def compute_score(data_source, solution_str, ground_truth, extra_info=None):
     # Format penalty
     format_penalty = _compute_format_penalty(solution_str)
 
-    # LLM judge
-    if gold_answer and answer_to_grade:
-        try:
-            loop = asyncio.get_running_loop()
-        except RuntimeError:
-            loop = None
-
-        if loop and loop.is_running():
-            import concurrent.futures
-            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-                judge_result = pool.submit(
-                    asyncio.run,
-                    _call_judge(question, key_points, answer_to_grade),
-                ).result()
-        else:
-            judge_result = asyncio.run(
-                _call_judge(question, key_points, answer_to_grade)
-            )
-
+    if judge_result is not None:
         reward = _compute_reward(judge_result, key_points)
         judge_score = reward["penalized_score"]
         completeness_val = _compute_completeness(judge_result, key_points)
@@ -443,7 +409,7 @@ def compute_score(data_source, solution_str, ground_truth, extra_info=None):
     # Final score: judge reward (0-1) + format penalty, floored at 0
     final_score = max(0.0, judge_score + format_penalty)
 
-    scores = {
+    return {
         "score": final_score,
         "reward/judge_score": judge_score,
         "reward/raw_score": reward["raw_score"],
@@ -454,4 +420,149 @@ def compute_score(data_source, solution_str, ground_truth, extra_info=None):
         "reward/reasoning_length": reasoning_len,
         "reward/answer_length": answer_len,
     }
+
+
+# ============================================================================
+# BATCHED JUDGE CALLS
+# ============================================================================
+_JUDGE_SEMAPHORE = None
+
+
+async def _call_judge_batch(items):
+    """Call the judge for all items concurrently with a concurrency limit."""
+    global _JUDGE_SEMAPHORE
+    if _JUDGE_SEMAPHORE is None:
+        _JUDGE_SEMAPHORE = asyncio.Semaphore(32)
+
+    async def _guarded(question, key_points, answer):
+        async with _JUDGE_SEMAPHORE:
+            return await _call_judge(question, key_points, answer)
+
+    tasks = [_guarded(q, kp, a) for q, kp, a in items]
+    return await asyncio.gather(*tasks)
+
+
+# ============================================================================
+# MAIN ENTRY POINT
+# ============================================================================
+def compute_score(
+    data_source=None, solution_str=None, ground_truth=None, extra_info=None,
+    # Plural (batched) kwargs — used by BatchRewardManager
+    data_sources=None, solution_strs=None, ground_truths=None, extra_infos=None,
+    **kwargs,
+):
+    """
+    Compute reward scores for medical QA.
+
+    Handles two calling conventions:
+    - NaiveRewardManager: singular kwargs (data_source, solution_str, ground_truth, extra_info)
+    - BatchRewardManager: plural kwargs (data_sources, solution_strs, ground_truths, extra_infos)
+
+    Returns:
+        Single call: dict with "score" and component metrics
+        Batched call: list of such dicts
+    """
+    # Detect which calling convention was used
+    if solution_strs is not None:
+        # Batched call
+        return _compute_score_batch(data_sources, solution_strs, ground_truths, extra_infos)
+    else:
+        # Single call
+        return _compute_score_single(data_source, solution_str, ground_truth, extra_info)
+
+
+def _compute_score_single(data_source, solution_str, ground_truth, extra_info=None):
+    """Score a single sample (called by NaiveRewardManager)."""
+    if isinstance(ground_truth, str):
+        ground_truth = json.loads(ground_truth)
+
+    gold_answer = ground_truth.get("gold_answer", "")
+    key_points = ground_truth.get("key_points", [])
+
+    question = ""
+    if extra_info and isinstance(extra_info, dict):
+        question = extra_info.get("question", "")
+
+    extracted = _extract_answer(solution_str)
+    answer_to_grade = extracted if extracted else ""
+
+    # Call judge for this single sample
+    judge_result = None
+    if gold_answer and answer_to_grade:
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = None
+
+        if loop and loop.is_running():
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                judge_result = pool.submit(
+                    asyncio.run,
+                    _call_judge(question, key_points, answer_to_grade),
+                ).result()
+        else:
+            judge_result = asyncio.run(
+                _call_judge(question, key_points, answer_to_grade)
+            )
+
+    return _score_single(solution_str, ground_truth, extra_info, judge_result)
+
+
+def _compute_score_batch(data_sources, solution_strs, ground_truths, extra_infos=None):
+    """Score a batch of samples (called by BatchRewardManager)."""
+    n = len(solution_strs)
+    if extra_infos is None:
+        extra_infos = [{}] * n
+
+    # Parse ground truths and build judge call items
+    judge_items = []  # (index, question, key_points, answer)
+    parsed_gts = []
+    for i in range(n):
+        gt = ground_truths[i]
+        if isinstance(gt, str):
+            gt = json.loads(gt)
+        parsed_gts.append(gt)
+
+        gold_answer = gt.get("gold_answer", "")
+        key_points = gt.get("key_points", [])
+
+        question = ""
+        ei = extra_infos[i]
+        if ei and isinstance(ei, dict):
+            question = ei.get("question", "")
+
+        extracted = _extract_answer(solution_strs[i])
+        answer_to_grade = extracted if extracted else ""
+
+        if gold_answer and answer_to_grade:
+            judge_items.append((i, question, key_points, answer_to_grade))
+
+    # Run all judge calls concurrently
+    judge_results = [None] * n
+    if judge_items:
+        call_args = [(q, kp, a) for _, q, kp, a in judge_items]
+
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = None
+
+        if loop and loop.is_running():
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                results = pool.submit(asyncio.run, _call_judge_batch(call_args)).result()
+        else:
+            results = asyncio.run(_call_judge_batch(call_args))
+
+        for (idx, _, _, _), result in zip(judge_items, results):
+            judge_results[idx] = result
+
+    # Build per-sample score dicts
+    scores = []
+    for i in range(n):
+        scores.append(_score_single(
+            solution_strs[i], parsed_gts[i], extra_infos[i], judge_results[i]
+        ))
+
     return scores

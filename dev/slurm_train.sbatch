@@ -3,7 +3,7 @@
 #SBATCH --partition=cluster
 #SBATCH --nodes=1
 #SBATCH --gres=gpu:8
-#SBATCH --cpus-per-task=32
+#SBATCH --cpus-per-task=192
 #SBATCH --mem=0
 #SBATCH --output=/home/hazem/verl-rl/train-%j.log
 #SBATCH --error=/home/hazem/verl-rl/train-%j.log
@@ -31,8 +31,9 @@ srun \
   --container-mounts="${VERL_REPO}:/workspace/verl,${MODEL_DIR}:${MODEL_DIR},$HOME/.cache/huggingface:/root/.cache/huggingface,$HOME/.cache/torch:/root/.cache/torch" \
   --container-workdir="/workspace/verl" \
   bash -c '
-    # Install verl in editable mode (fast, no-deps)
+    # Install verl in editable mode + openai for judge
     pip3 install --no-deps -e . 2>/dev/null
+    pip3 install openai 2>/dev/null
 
     # Run training
     bash rl_scripts/grpo_qa_8h100.sh
