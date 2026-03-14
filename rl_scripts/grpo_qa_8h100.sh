@@ -38,9 +38,9 @@ MAX_NUM_GEN_BATCHES=10
 # ===== WandB =====
 export WANDB_API_KEY=""
 
-# ===== Gemini judge env (reward function reads these) =====
-export QA_JUDGE_API_KEY=""
-export QA_JUDGE_BASE_URL="https://generativelanguage.googleapis.com/v1beta/openai/"
+# ===== Vertex AI judge env (reward function reads these) =====
+export QA_JUDGE_CREDENTIALS_FILE="/data/hazem/creds/vertex-sa.json"
+export QA_JUDGE_BASE_URL="https://aiplatform.googleapis.com/v1beta1/projects/project-a8ff85a9-571d-4e15-841/locations/global/endpoints/openapi/"
 export QA_JUDGE_MODEL="gemini-3-flash-preview"
 
 python3 -m verl.trainer.main_ppo \
@@ -82,7 +82,7 @@ python3 -m verl.trainer.main_ppo \
   actor_rollout_ref.actor.loss_agg_mode="token-mean" \
   \
   actor_rollout_ref.actor.use_kl_loss=True \
-  actor_rollout_ref.actor.kl_loss_coef=0.03 \
+  actor_rollout_ref.actor.kl_loss_coef=0.001 \
   algorithm.use_kl_in_reward=True \
   \
   actor_rollout_ref.actor.clip_ratio_low="${CLIP_LOW}" \
@@ -99,7 +99,7 @@ python3 -m verl.trainer.main_ppo \
   actor_rollout_ref.rollout.top_p="${TOP_P}" \
   actor_rollout_ref.ref.log_prob_micro_batch_size_per_gpu=2 \
   actor_rollout_ref.ref.fsdp_config.param_offload=True \
-  actor_rollout_ref.rollout.tensor_model_parallel_size=2 \
+  actor_rollout_ref.rollout.tensor_model_parallel_size=4 \
   \
   custom_reward_function.path="/workspace/verl/verl/utils/reward_score/qa.py" \
   custom_reward_function.name="compute_score" \

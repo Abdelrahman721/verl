@@ -35,27 +35,48 @@ THINKING_START = "<think>"
 THINKING_END = "</think>"
 
 # ============================================================================
-# LLM JUDGE CONFIG
+# LLM JUDGE CONFIG — Vertex AI with service account credentials
 # ============================================================================
 _JUDGE_CLIENT = None
+_JUDGE_CREDENTIALS = None
+_JUDGE_TOKEN = None
 
-JUDGE_API_KEY = os.environ.get(
-    "QA_JUDGE_API_KEY", "AIzaSyAmATcYXXCcNNOU3-kcmMabf7Q_jMGVaZI"
+JUDGE_CREDENTIALS_FILE = os.environ.get(
+    "QA_JUDGE_CREDENTIALS_FILE", "/data/hazem/creds/vertex-sa.json"
 )
 JUDGE_BASE_URL = os.environ.get(
     "QA_JUDGE_BASE_URL",
-    "https://generativelanguage.googleapis.com/v1beta/openai/",
+    "https://aiplatform.googleapis.com/v1beta1/projects/project-a8ff85a9-571d-4e15-841/locations/global/endpoints/openapi/",
 )
 JUDGE_MODEL = os.environ.get("QA_JUDGE_MODEL", "gemini-3-flash-preview")
 
 
 def _get_judge_client():
-    global _JUDGE_CLIENT
-    if _JUDGE_CLIENT is None:
+    """Return an AsyncOpenAI client authenticated via Vertex AI service account.
+
+    Tokens are refreshed automatically when they expire (~60 min).
+    """
+    global _JUDGE_CLIENT, _JUDGE_CREDENTIALS, _JUDGE_TOKEN
+
+    from google.oauth2 import service_account
+    import google.auth.transport.requests
+
+    if _JUDGE_CREDENTIALS is None:
+        _JUDGE_CREDENTIALS = service_account.Credentials.from_service_account_file(
+            JUDGE_CREDENTIALS_FILE,
+            scopes=["https://www.googleapis.com/auth/cloud-platform"],
+        )
+
+    if _JUDGE_CREDENTIALS.expired or not _JUDGE_CREDENTIALS.token:
+        _JUDGE_CREDENTIALS.refresh(google.auth.transport.requests.Request())
+
+    if _JUDGE_CREDENTIALS.token != _JUDGE_TOKEN:
+        _JUDGE_TOKEN = _JUDGE_CREDENTIALS.token
         _JUDGE_CLIENT = AsyncOpenAI(
-            api_key=JUDGE_API_KEY,
+            api_key=_JUDGE_TOKEN,
             base_url=JUDGE_BASE_URL,
         )
+
     return _JUDGE_CLIENT
 
 
