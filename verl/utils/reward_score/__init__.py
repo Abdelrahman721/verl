@@ -45,7 +45,18 @@ def default_compute_score(
         from . import gsm8k
 
         res = gsm8k.compute_score(solution_str, ground_truth)
+    elif data_source == "snomed_mixed":
+        # Combined single + multilabel parquet; per-example "source" in ground_truth JSON.
+        from . import snomed_mixed
+
+        res = snomed_mixed.compute_score(solution_str, ground_truth)
+    elif "sct_multilabel" in data_source:
+        # SCT multilabel reward placeholder (empty skeleton for now).
+        from . import sct_multilabel
+
+        res = sct_multilabel.compute_score(solution_str, ground_truth)
     elif "snomed" in data_source:
+        # Backward-compatible SNOMED single-label reward logic.
         from . import snomed
 
         res = snomed.compute_score(solution_str, ground_truth)

@@ -1,11 +1,11 @@
 set -x
 
-MODEL_PATH="models/Qwen3-4B-Base-sft-440"
-TRAIN_FILES="/workspace/verl/rl-data/multilabel_combined_train_rl.parquet"
-VAL_FILES="/workspace/verl/rl-data/multilabel_combined_test_rl.parquet"
+MODEL_PATH="models/Qwen3-4B-Base-sft-16692"
+TRAIN_FILES="/workspace/verl/rl-data/sct_mixed_train_rl.parquet"
+VAL_FILES="/workspace/verl/rl-data/sct_mixed_test_rl.parquet"
 
 PROJECT_NAME="RL-Exps"
-EXP_NAME="grpo++_snomed_setB1_rl_seq_sl_ml"
+EXP_NAME="grpo++_snomed_setB1_rl_mixed"
 
 MAX_PROMPT_LEN=4096
 MAX_RESPONSE_LEN=8192
@@ -92,6 +92,6 @@ python3 -m verl.trainer.main_ppo \
   trainer.save_freq=10 \
   trainer.test_freq=10 \
   trainer.total_epochs=5 \
-  trainer.rollout_data_dir=/workspace/verl/verl_dumps/rollouts \
-  trainer.validation_data_dir=/workspace/verl/verl_dumps/val \
+  trainer.rollout_data_dir=/workspace/verl/verl_dumps_mixed/rollouts \
+  trainer.validation_data_dir=/workspace/verl/verl_dumps_mixed/val \
   "$@"

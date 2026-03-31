@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=rl-seq-ml
+#SBATCH --job-name=rl-mixed
 #SBATCH --partition=cluster
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
@@ -29,4 +29,4 @@ srun \
   --container-image="verlai/verl:vllm012.latest" \
   --container-mounts="${MOUNTS}" \
   --container-workdir="/workspace/verl" \
-  bash -c 'pip3 install --no-deps -e . 2>/dev/null; exec bash /workspace/verl/rl_scripts/modified_grpo.sh'
+  bash -c 'pip3 install --no-deps -e . 2>/dev/null; exec bash /workspace/verl/rl_scripts/modified_grpo1.sh'

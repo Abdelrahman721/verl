@@ -16,9 +16,8 @@ srun \
   --partition=cluster \
   --nodes=1 \
   --ntasks=1 \
-  --gres=gpu:8 \
-  --cpus-per-task=192 \
-  --mem=512G \
+  --cpus-per-task=64 \
+  --mem=256G \
   --pty \
   --container-image="verlai/verl:vllm012.latest" \
   --container-mounts="${MOUNTS}" \

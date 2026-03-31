@@ -133,3 +133,5 @@ models/
 Datasets/
 rl-data/
 verl_dumps/
+checkpoints/
+verl_dumps_mixed/
