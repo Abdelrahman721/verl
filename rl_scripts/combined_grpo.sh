@@ -1,15 +1,15 @@
 set -x
 
-MODEL_PATH="./model_merged"
-TRAIN_FILES="$HOME/data/ifeval/train.parquet"
-VAL_FILES="$HOME/data/ifeval/test.parquet"
+MODEL_PATH="${MODEL_PATH:-./model_merged}"
+DATA_DIR="${DATA_DIR:-/data/abdelrahman/verl/data/combined}"
+TRAIN_FILES="${DATA_DIR}/train.parquet"
+VAL_FILES="${DATA_DIR}/eval.parquet"
 
 PROJECT_NAME="RL-Exps"
-EXP_NAME="ifeval-grpo++-lora-ft"
+EXP_NAME="combined-grpo-math-if-general"
 
-# IF prompts can be longer than math, but responses are typically shorter
 MAX_PROMPT_LEN=1024
-MAX_RESPONSE_LEN=32768
+MAX_RESPONSE_LEN=16384
 
 TEMP=1.0
 TOP_P=1.0
@@ -28,7 +28,7 @@ ROLLOUT_IS_THRESHOLD=2.0
 FILTER_METRIC="seq_reward"
 MAX_NUM_GEN_BATCHES=10
 
-REWARD_FN_PATH="rl_scripts/ifeval_reward.py"
+REWARD_FN_PATH="rl_scripts/combined_reward.py"
 REWARD_FN_NAME="compute_score"
 
 python3 -m verl.trainer.main_ppo \
