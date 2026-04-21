@@ -16,7 +16,7 @@ REPO_ROOT="/data/muhsen/repos/verl"
 
 BASE="/data/muhsen/verl-rl"
 mkdir -p "$BASE/.cache/huggingface" "$BASE/.cache/torch" "$BASE/.cache/vllm"
-export WANDB_API_KEY="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"
+export WANDB_API_KEY=$WANDB_API_KEY
 # mkdir -p /data/muhsen/enroot/{data,runtime,cache}
 # export ENROOT_DATA_PATH=/data/muhsen/enroot/data
 # export ENROOT_RUNTIME_PATH=/data/muhsen/enroot/runtime

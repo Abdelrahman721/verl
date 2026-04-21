@@ -1,11 +1,27 @@
 set -x
 
-MODEL_PATH="models/Qwen3-4B-Base-sft-440"
-TRAIN_FILES="/workspace/verl/rl-data/multilabel_combined_train_rl.parquet"
-VAL_FILES="/workspace/verl/rl-data/multilabel_combined_test_rl.parquet"
+# SNOMED label index for instruction_following / sct_if reward (evaluate_row, label validation).
+# Default: sibling checkout of mcs-instruct-dataset next to verl. Override in container if your mount differs.
+export INSTRUCTION_FOLLOWING_LABELS_CSV="/workspace/verl/Datasets/set_B1_sct_id_labels.csv"
+export WANDB_RUN_ID=uuweq43f      # the run id from wandb/run-...-uuweq43f
+export WANDB_RESUME=must         # or "allow"
+
+echo "=== env (instruction_following / judges / ssl) ==="
+echo "INSTRUCTION_FOLLOWING_LABELS_CSV=$INSTRUCTION_FOLLOWING_LABELS_CSV"
+echo "IF_USE_LLM_JUDGES=$IF_USE_LLM_JUDGES"
+echo "DEEPSEEK_API_KEY=$DEEPSEEK_API_KEY"
+echo "SSL_CERT_FILE=$SSL_CERT_FILE"
+echo "REQUESTS_CA_BUNDLE=$REQUESTS_CA_BUNDLE"
+echo "CURL_CA_BUNDLE=$CURL_CA_BUNDLE"
+echo "SSL_CERT_DIR=${SSL_CERT_DIR:-}"
+
+# Parquets from examples/data_preprocess/snomed_mixed_combine.py (data_source=sct_mixed, per-row reward dispatch).
+MODEL_PATH="models/Qwen3-4B-Base-sft-2345"
+TRAIN_FILES="/workspace/verl/rl-data/sct_mixed_train_all.parquet"
+VAL_FILES="/workspace/verl/rl-data/sct_mixed_test_all.parquet"
 
 PROJECT_NAME="RL-Exps"
-EXP_NAME="grpo++_snomed_setB1_rl_seq_sl_ml"
+EXP_NAME="grpo++_sct_mixed_all_if_sl_ml"
 
 MAX_PROMPT_LEN=4096
 MAX_RESPONSE_LEN=8192

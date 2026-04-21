@@ -6,9 +6,10 @@ snomedml_preprocess.py (multilabel) into one training dataset.
 Each row's reward_model.ground_truth JSON gains a "source" field:
   - "single"    -> single-label SNOMED (same schema as snomed_preprocess)
   - "multilabel" -> multilabel (same schema as snomedml_preprocess)
+  - "if"        -> instruction-following SNOMED (schema from sct_if_preprocess.py)
 
-All rows use data_source == "snomed_mixed" so default_compute_score routes to
-verl.utils.reward_score.snomed_mixed (per-entry dispatch to snomed vs sct_multilabel).
+All rows use data_source == "sct_mixed" so default_compute_score routes to
+verl.utils.reward_score.sct_mixed (per-entry dispatch to snomed vs sct_multilabel vs sct_if).
 """
 
 from __future__ import annotations
@@ -22,7 +23,7 @@ from typing import Any, Dict
 import datasets
 
 
-MIXED_DATA_SOURCE = "snomed_mixed"
+MIXED_DATA_SOURCE = "sct_mixed"
 
 
 def _add_source_and_retag(
@@ -49,7 +50,7 @@ def _add_source_and_retag(
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description="Merge single-label and multilabel SNOMED parquets into one mixed dataset.",
+        description="Merge single-label, multilabel, and IF SNOMED parquets into one mixed dataset.",
     )
     parser.add_argument(
         "--single_parquet",
@@ -64,13 +65,19 @@ if __name__ == "__main__":
         help="Parquet from snomedml_preprocess.py (e.g. multilabel_combined_train_rl.parquet).",
     )
     parser.add_argument(
+        "--if_parquet",
+        type=str,
+        default="",
+        help="Optional parquet from sct_if_preprocess.py (instruction-following).",
+    )
+    parser.add_argument(
         "--local_save_dir",
         default="/workspace/verl/rl-data/",
         help="Directory to save the combined parquet.",
     )
     parser.add_argument(
         "--out_parquet_name",
-        default="snomed_mixed_train.parquet",
+        default="sct_mixed_train.parquet",
         help="Output parquet filename (written under local_save_dir).",
     )
     parser.add_argument(
@@ -82,13 +89,17 @@ if __name__ == "__main__":
 
     single_path = Path(args.single_parquet)
     ml_path = Path(args.multilabel_parquet)
+    if_path = Path(args.if_parquet) if args.if_parquet.strip() else None
     if not single_path.is_file():
         raise FileNotFoundError(f"Single-label parquet not found: {single_path}")
     if not ml_path.is_file():
         raise FileNotFoundError(f"Multilabel parquet not found: {ml_path}")
+    if if_path is not None and not if_path.is_file():
+        raise FileNotFoundError(f"IF parquet not found: {if_path}")
 
     ds_single = datasets.load_dataset("parquet", data_files=str(single_path), split="train")
     ds_ml = datasets.load_dataset("parquet", data_files=str(ml_path), split="train")
+    ds_if = datasets.load_dataset("parquet", data_files=str(if_path), split="train") if if_path is not None else None
 
     rows: list[Dict[str, Any]] = []
     idx = 0
@@ -98,6 +109,9 @@ if __name__ == "__main__":
         if args.single_first
         else [(ds_ml, "multilabel"), (ds_single, "single")]
     )
+    if ds_if is not None:
+        # Put IF last by default; IF ordering isn't semantically special and keeps existing behavior stable.
+        order.append((ds_if, "if"))
     for ds, source_key in order:
         for ex in ds:
             rows.append(_add_source_and_retag(ex, source_key, idx))
@@ -110,5 +124,10 @@ if __name__ == "__main__":
     combined.to_parquet(str(out_path))
 
     print(f"Saved combined parquet to: {out_path}")
-    print(f"Total examples: {len(combined)} ({len(ds_single)} single + {len(ds_ml)} multilabel)")
+    if ds_if is None:
+        print(f"Total examples: {len(combined)} ({len(ds_single)} single + {len(ds_ml)} multilabel)")
+    else:
+        print(
+            f"Total examples: {len(combined)} ({len(ds_single)} single + {len(ds_ml)} multilabel + {len(ds_if)} if)"
+        )
     print(f"data_source for all rows: {MIXED_DATA_SOURCE!r}")

@@ -50,11 +50,21 @@ def default_compute_score(
         from . import snomed_mixed
 
         res = snomed_mixed.compute_score(solution_str, ground_truth)
+    elif data_source == "sct_mixed":
+        # Combined single + multilabel + instruction-following; per-example "source" in ground_truth JSON.
+        from . import sct_mixed
+
+        res = sct_mixed.compute_score(solution_str, ground_truth, extra_info=extra_info)
     elif "sct_multilabel" in data_source:
         # SCT multilabel reward placeholder (empty skeleton for now).
         from . import sct_multilabel
 
         res = sct_multilabel.compute_score(solution_str, ground_truth)
+    elif data_source == "sct_if":
+        # SNOMED instruction-following (combined RL / IF JSONL → sct_if_preprocess parquet).
+        from . import sct_if
+
+        res = sct_if.compute_score(solution_str, ground_truth, extra_info=extra_info)
     elif "snomed" in data_source:
         # Backward-compatible SNOMED single-label reward logic.
         from . import snomed

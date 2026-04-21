@@ -16,8 +16,9 @@ srun \
   --partition=cluster \
   --nodes=1 \
   --ntasks=1 \
-  --cpus-per-task=64 \
-  --mem=256G \
+  --cpus-per-task=16 \
+  --mem=50G \
+  --nodelist=denvrbm-2123 \
   --pty \
   --container-image="verlai/verl:vllm012.latest" \
   --container-mounts="${MOUNTS}" \
