@@ -24,3 +24,8 @@ fastapi
 latex2sympy2_extended
 math_verify
 tensorboard
+langdetect
+immutabledict
+nltk
+peft
+openai

@@ -1,15 +1,16 @@
 #!/usr/bin/env bash
-# GRPO training on the full_mix (Math + IFEval + Chat + Safety) with the
-# custom reward dispatcher at full_mix/rewards/compute_score.py.
+# Per-domain diagnostic: train GRPO on ONLY the chat subset.
+# No rule-based eval exists for chat (user does their own). VAL_FILES is set
+# to a placeholder parquet to keep the VERL config loader happy, and periodic
+# eval is disabled via +trainer.val_before_train=False and a high test_freq,
+# so no judge calls are spent on validation during diagnosis.
 #
-# Run this INSIDE the container started by dev/dev.sh. Chat + safety use an
-# LLM-as-judge — configure via FULL_MIX_JUDGE_* env vars. Default points at a
-# local vLLM OpenAI-compatible endpoint; swap to OpenRouter by setting
-# FULL_MIX_JUDGE_API_BASE=https://openrouter.ai/api/v1 and the appropriate key.
+# The judge IS still used to compute training rewards for chat rollouts —
+# make sure FULL_MIX_JUDGE_* env vars point at a reachable OpenRouter/vLLM
+# endpoint before launching.
 
 set -x
 
-# Load secrets (gitignored). Copy full_mix/secrets.env.example → secrets.env.
 _FM_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 if [[ -f "$_FM_DIR/secrets.env" ]]; then
   source "$_FM_DIR/secrets.env"
@@ -20,15 +21,13 @@ MODEL_PATH=${MODEL_PATH:-Qwen/Qwen3-4B-Base}
 
 # ---- data ----
 DATA_DIR=${DATA_DIR:-/data/abdelrahman/verl/data/full_mix}
-TRAIN_FILES="[${DATA_DIR}/train/math_train.parquet,${DATA_DIR}/train/ifeval_train.parquet,${DATA_DIR}/train/chat_train.parquet,${DATA_DIR}/train/safety_train.parquet]"
-# NOTE: ifbench_eval dropped — its constraint IDs are not in full_mix/ifeval/
-# FUNCTION_DICT, so 100% of constraints score 0. Re-add once IFBench checkers
-# are ported from allenai/open-instruct into full_mix/ifeval/instructions.py.
-VAL_FILES="[${DATA_DIR}/eval/gsm8k_eval.parquet,${DATA_DIR}/eval/math500_eval.parquet,${DATA_DIR}/eval/ifeval_eval.parquet]"
+TRAIN_FILES="[${DATA_DIR}/train/chat_train.parquet]"
+# Placeholder val file — eval disabled below so no judge calls happen here.
+VAL_FILES="[${DATA_DIR}/eval/math500_eval.parquet]"
 
 # ---- experiment metadata ----
 PROJECT_NAME=${PROJECT_NAME:-RL-Exps}
-EXP_NAME=${EXP_NAME:-full-mix-grpo}
+EXP_NAME=${EXP_NAME:-full-mix-chat-only}
 
 # ---- sequence lengths ----
 MAX_PROMPT_LEN=${MAX_PROMPT_LEN:-2048}
@@ -51,24 +50,18 @@ ROLLOUT_IS_THRESHOLD=${ROLLOUT_IS_THRESHOLD:-2.0}
 FILTER_METRIC=${FILTER_METRIC:-seq_reward}
 MAX_NUM_GEN_BATCHES=${MAX_NUM_GEN_BATCHES:-3}
 
-# ---- cluster layout (override for multi-node; see full_mix/multinode.md) ----
-NNODES=${NNODES:-1}
-N_GPUS_PER_NODE=${N_GPUS_PER_NODE:-8}
-
 # ---- reward dispatcher ----
-REWARD_FN_PATH=${REWARD_FN_PATH:-/workspace/verl/full_mix/rewards/compute_score.py}
+REWARD_FN_PATH=${REWARD_FN_PATH:-full_mix/rewards/compute_score.py}
 REWARD_FN_NAME=${REWARD_FN_NAME:-compute_score}
 
-# ---- judge (self-hosted vLLM by default; override for OpenRouter) ----
+# ---- judge (required — chat rewards call the judge during training) ----
 export FULL_MIX_JUDGE_API_BASE=${FULL_MIX_JUDGE_API_BASE:-http://127.0.0.1:8000/v1}
 export FULL_MIX_JUDGE_API_KEY=${FULL_MIX_JUDGE_API_KEY:-EMPTY}
 export FULL_MIX_JUDGE_MODEL=${FULL_MIX_JUDGE_MODEL:-Qwen/Qwen2.5-7B-Instruct}
 export FULL_MIX_JUDGE_TIMEOUT=${FULL_MIX_JUDGE_TIMEOUT:-120}
 export FULL_MIX_JUDGE_MAX_RETRIES=${FULL_MIX_JUDGE_MAX_RETRIES:-10}
 export FULL_MIX_JUDGE_MAX_TOKENS=${FULL_MIX_JUDGE_MAX_TOKENS:-4096}
-# JSON-mode guided decoding (vLLM): eliminates "Thinking Process:" preambles.
 export FULL_MIX_JUDGE_FORCE_JSON=${FULL_MIX_JUDGE_FORCE_JSON:-1}
-# Qwen3-family: disable chain-of-thought in the chat template. Harmless for others.
 export FULL_MIX_JUDGE_DISABLE_THINKING=${FULL_MIX_JUDGE_DISABLE_THINKING:-1}
 export FULL_MIX_JUDGE_CONCURRENCY=${FULL_MIX_JUDGE_CONCURRENCY:-32}
 
@@ -136,11 +129,12 @@ python3 -m verl.trainer.main_ppo \
   trainer.logger='["console","wandb"]' \
   trainer.project_name="${PROJECT_NAME}" \
   trainer.experiment_name="${EXP_NAME}" \
-  trainer.nnodes="${NNODES}" \
-  trainer.n_gpus_per_node="${N_GPUS_PER_NODE}" \
+  trainer.nnodes=1 \
+  trainer.n_gpus_per_node=8 \
   trainer.save_freq=20 \
-  trainer.test_freq=20 \
+  trainer.test_freq=100000 \
+  trainer.val_before_train=False \
   trainer.total_epochs=3 \
-  trainer.rollout_data_dir=$HOME/verl_dumps/full_mix_rollouts \
-  trainer.validation_data_dir=$HOME/verl_dumps/full_mix_val \
+  trainer.rollout_data_dir=$HOME/verl_dumps/full_mix_chat_only_rollouts \
+  trainer.validation_data_dir=$HOME/verl_dumps/full_mix_chat_only_val \
   "$@"

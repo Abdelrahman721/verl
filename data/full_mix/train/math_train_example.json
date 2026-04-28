@@ -1,0 +1,19 @@
+{
+  "prompt": [
+    {
+      "content": "In triangle $ABC$, $\\sin \\angle A = \\frac{4}{5}$ and $\\angle A < 90^\\circ$. Let $D$ be a point outside triangle $ABC$ such that $\\angle BAD = \\angle DAC$ and $\\angle BDC = 90^\\circ$. Suppose that $AD = 1$ and that $\\frac{BD}{CD} = \\frac{3}{2}$. If $AB + AC$ can be expressed in the form $\\frac{a\\sqrt{b}}{c}$ where $a, b, c$ are pairwise relatively prime integers, find $a + b + c$. Let's think step by step and output the final answer within \\boxed{}.",
+      "role": "user"
+    }
+  ],
+  "data_source": "local/dolci-math-7b",
+  "ability": "math",
+  "reward_model": {
+    "ground_truth": "34",
+    "style": "rule"
+  },
+  "extra_info": {
+    "index": 0,
+    "original_dataset": "math",
+    "split": "train"
+  }
+}

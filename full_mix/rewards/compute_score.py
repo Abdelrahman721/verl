@@ -103,30 +103,23 @@ def _concurrency() -> int:
     return max(1, n)
 
 
-def compute_score(
+def _compute_score_batch(
     data_sources,
     solution_strs,
     ground_truths,
     extra_infos=None,
-    **kwargs,
 ) -> list:
-    """Batch reward function compatible with VERL's BatchRewardManager.
+    """Batch path: called once for the whole rollout (BatchRewardManager style).
 
-    Args:
-        data_sources: list[str] of length B.
-        solution_strs: list[str] model responses, length B.
-        ground_truths: list of ground-truth references, length B.
-        extra_infos: list[dict|None] or None.
-
-    Returns:
-        list[float] of per-sample rewards in [0, 1].
+    Rule-based scorers run inline; judge-based (chat/safety) fan out via a
+    ThreadPoolExecutor so judge calls issue concurrently against the remote
+    vLLM endpoint.
     """
     n = len(data_sources)
     if extra_infos is None:
         extra_infos = [None] * n
     scores: list[float] = [0.0] * n
 
-    # Partition into rule-based (synchronous) and judge-based (concurrent).
     judge_indices: list[int] = []
     for i, ds in enumerate(data_sources):
         if ds in _JUDGE_BASED:
@@ -156,3 +149,33 @@ def compute_score(
                     scores[i] = 0.0
 
     return scores
+
+
+def compute_score(*args, **kwargs):
+    """Dual-signature entry point.
+
+    VERL dispatches reward scoring differently depending on the configured
+    reward manager. Two signatures can reach this function:
+
+      Per-item (experimental RewardLoopManager's ``naive`` / ``dapo``):
+        compute_score(data_source=..., solution_str=..., ground_truth=...,
+                      extra_info={}, **router_kwargs) -> float
+
+      Batched (``BatchRewardManager``):
+        compute_score(data_sources=[...], solution_strs=[...],
+                      ground_truths=[...], extra_infos=[...]) -> list[float]
+
+    We detect which one the caller used and route accordingly.
+    """
+    if "data_sources" in kwargs or (args and isinstance(args[0], (list, tuple))):
+        data_sources = kwargs.get("data_sources", args[0] if args else None)
+        solution_strs = kwargs.get("solution_strs", args[1] if len(args) > 1 else None)
+        ground_truths = kwargs.get("ground_truths", args[2] if len(args) > 2 else None)
+        extra_infos = kwargs.get("extra_infos", args[3] if len(args) > 3 else None)
+        return _compute_score_batch(data_sources, solution_strs, ground_truths, extra_infos)
+
+    data_source = kwargs.get("data_source", args[0] if args else None)
+    solution_str = kwargs.get("solution_str", args[1] if len(args) > 1 else None)
+    ground_truth = kwargs.get("ground_truth", args[2] if len(args) > 2 else None)
+    extra_info = kwargs.get("extra_info", args[3] if len(args) > 3 else None)
+    return _score_one(data_source, solution_str, ground_truth, extra_info)

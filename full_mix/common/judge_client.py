@@ -24,6 +24,17 @@ from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
 
+# Announce the resolved judge env on module import so we can see from Ray
+# worker logs whether the vars actually propagated.
+_resolved = {
+    "API_BASE": os.environ.get("FULL_MIX_JUDGE_API_BASE"),
+    "MODEL": os.environ.get("FULL_MIX_JUDGE_MODEL"),
+    "DISABLE_THINKING": os.environ.get("FULL_MIX_JUDGE_DISABLE_THINKING"),
+    "FORCE_JSON": os.environ.get("FULL_MIX_JUDGE_FORCE_JSON"),
+    "HAS_KEY": bool(os.environ.get("FULL_MIX_JUDGE_API_KEY")),
+}
+print(f"[judge_client boot pid={os.getpid()}] env resolved: {_resolved}", flush=True)
+
 
 class JudgeUnavailable(RuntimeError):
     """Raised when the judge client cannot be configured / reached."""
@@ -114,10 +125,19 @@ def call_judge(
 
     Retries transient failures with exponential backoff. Raises
     JudgeUnavailable on persistent failure or misconfiguration.
+
+    By default we constrain the server to emit a JSON object via the OpenAI
+    ``response_format`` field. vLLM implements this via guided decoding, which
+    stops thinking-style models from spewing a reasoning preamble before the
+    JSON (and blowing through ``max_tokens``). Disable by setting
+    ``FULL_MIX_JUDGE_FORCE_JSON=0`` or by passing ``response_format={}``.
     """
     client, model = _get_client()
     max_tokens = max_tokens or _env_int("FULL_MIX_JUDGE_MAX_TOKENS", 512)
     max_retries = _env_int("FULL_MIX_JUDGE_MAX_RETRIES", 3)
+
+    if response_format is None and os.environ.get("FULL_MIX_JUDGE_FORCE_JSON", "1") != "0":
+        response_format = {"type": "json_object"}
 
     kwargs = {
         "model": model,
@@ -125,8 +145,13 @@ def call_judge(
         "max_tokens": max_tokens,
         "temperature": temperature,
     }
-    if response_format is not None:
+    if response_format:
         kwargs["response_format"] = response_format
+
+    # For Qwen3-family thinking models, turn off CoT in the chat template
+    # so the output is JSON-only (safe to pass; non-Qwen models ignore it).
+    if os.environ.get("FULL_MIX_JUDGE_DISABLE_THINKING", "1") != "0":
+        kwargs["extra_body"] = {"chat_template_kwargs": {"enable_thinking": False}}
 
     last_err: Optional[BaseException] = None
     for attempt in range(max_retries + 1):

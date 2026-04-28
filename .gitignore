@@ -128,3 +128,11 @@ logs
 log
 outputs
 .history
+
+# secrets — never commit
+full_mix/secrets.env
+**/secrets.env
+**.jsonl
+
+.claude
+full_mix/runtime_env.yaml

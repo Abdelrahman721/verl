@@ -1,0 +1,19 @@
+{
+  "prompt": [
+    {
+      "content": "Write a 30-line poem with short sentences without any comma. Each line should contain exactly one sentence. Make sure that you put the right punctuation at the end of each line. Your entire response should contain the poem only.",
+      "role": "user"
+    }
+  ],
+  "data_source": "google/IFEval",
+  "ability": "instruction_following",
+  "reward_model": {
+    "ground_truth": "[{'instruction_id': ['punctuation:no_comma', 'length_constraints:number_sentences', 'length_constraints:number_sentences'], 'kwargs': [{'num_highlights': None, 'relation': None, 'num_words': None, 'num_placeholders': None, 'prompt_to_repeat': None, 'num_bullets': None, 'section_spliter': None, 'num_sections': None, 'capital_relation': None, 'capital_frequency': None, 'keywords': None, 'num_paragraphs': None, 'language': None, 'let_relation': None, 'letter': None, 'let_frequency': None, 'end_phrase': None, 'forbidden_words': None, 'keyword': None, 'frequency': None, 'num_sentences': None, 'postscript_marker': None, 'first_word': None, 'nth_paragraph': None}, {'num_highlights': None, 'relation': 'less than', 'num_words': None, 'num_placeholders': None, 'prompt_to_repeat': None, 'num_bullets': None, 'section_spliter': None, 'num_sections': None, 'capital_relation': None, 'capital_frequency': None, 'keywords': None, 'num_paragraphs': None, 'language': None, 'let_relation': None, 'letter': None, 'let_frequency': None, 'end_phrase': None, 'forbidden_words': None, 'keyword': None, 'frequency': None, 'num_sentences': 31, 'postscript_marker': None, 'first_word': None, 'nth_paragraph': None}, {'num_highlights': None, 'relation': 'at least', 'num_words': None, 'num_placeholders': None, 'prompt_to_repeat': None, 'num_bullets': None, 'section_spliter': None, 'num_sections': None, 'capital_relation': None, 'capital_frequency': None, 'keywords': None, 'num_paragraphs': None, 'language': None, 'let_relation': None, 'letter': None, 'let_frequency': None, 'end_phrase': None, 'forbidden_words': None, 'keyword': None, 'frequency': None, 'num_sentences': 30, 'postscript_marker': None, 'first_word': None, 'nth_paragraph': None}]}]",
+    "style": "rule"
+  },
+  "extra_info": {
+    "index": 0,
+    "key": "1418",
+    "split": "test"
+  }
+}

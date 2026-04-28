@@ -12,7 +12,12 @@ RECREATE="${RECREATE:-1}"         # 1 = delete + recreate container each run
 AS_USER="${AS_USER:-0}"           # 1 = run container as host UID/GID
 MOUNT_CACHES="${MOUNT_CACHES:-1}" # 1 = mount HF/torch/vllm caches
 NET_HOST="${NET_HOST:-1}"         # 1 = --net=host (recommended for vLLM/NCCL)
-SHM_SIZE="${SHM_SIZE:-10g}"
+SHM_SIZE="${SHM_SIZE:-20g}"
+
+# Extra host dirs to bind-mount identically into the container (colon-separated).
+# Default includes /data/abdelrahman so the preprocessors' absolute dataset and
+# output paths resolve inside the container. Override with DATA_MOUNTS="".
+DATA_MOUNTS="${DATA_MOUNTS:-/data/abdelrahman}"
 
 # Load optional env file (lets teammates customize without editing script)
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -48,6 +53,7 @@ if ! exists_container; then
   # Base args
   ARGS=(
     docker create
+    --init
     --runtime=nvidia --gpus all
     --shm-size="$SHM_SIZE"
     --cap-add=SYS_ADMIN
@@ -55,10 +61,26 @@ if ! exists_container; then
     -w "$WORKDIR_IN_CONTAINER"
     --name "$NAME"
   )
+  ARGS+=(
+    --privileged
+    --cgroupns=host
+  )
 
   # Host networking (vLLM server, NCCL, distributed, etc.)
   if [[ "$NET_HOST" == "1" ]]; then
     ARGS+=(--net=host)
+  fi
+
+  # Identity bind-mounts for shared data dirs so absolute host paths work inside.
+  if [[ -n "$DATA_MOUNTS" ]]; then
+    IFS=':' read -r -a _data_dirs <<< "$DATA_MOUNTS"
+    for d in "${_data_dirs[@]}"; do
+      if [[ -d "$d" ]]; then
+        ARGS+=(-v "$d":"$d")
+      else
+        echo "[!] DATA_MOUNTS entry does not exist on host, skipping: $d"
+      fi
+    done
   fi
 
   # Run as host user to avoid root-owned files on the mounted repo

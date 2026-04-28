@@ -1,0 +1,20 @@
+{
+  "prompt": [
+    {
+      "content": "To draft and review a contract, the first step is to ( \u00a0 \u00a0).",
+      "role": "user"
+    }
+  ],
+  "data_source": "local/dolci-chat-32b",
+  "ability": "chat",
+  "reward_model": {
+    "ground_truth": "Determine the type of contract",
+    "style": "rule"
+  },
+  "extra_info": {
+    "custom_id": "virtuoussy_multi_subject_rlvr_filtered-request-136-69",
+    "index": 0,
+    "split": "train",
+    "user_prompt": "To draft and review a contract, the first step is to ( \u00a0 \u00a0)."
+  }
+}

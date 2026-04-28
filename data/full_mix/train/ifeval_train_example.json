@@ -1,0 +1,21 @@
+{
+  "prompt": [
+    {
+      "content": "Write a function in Java that takes an input string and changes the case of each letter to its opposite (i.e. upper case to lower case and vice versa). Also, make your method responsive to a secondary boolean parameter: if it's true, the function will not only switch the case of each letter, but it will also reverse the order of the words in the string. If it's false, the function will just switch the case as before.\n\nExample:\nInput: \"Hello World\", true \nOutput: \"DLROW OLLEH\"\n\nYou'll need to account for punctuation and white spaces in your solution. Demonstrate the operation of your function with comprehensive test coverage, including edge cases.\n\nString input = \"Hello World\"; Copy the span of words that lies between (and including) index 106 and 563, the indices are character indices!",
+      "role": "user"
+    }
+  ],
+  "data_source": "local/dolci-ifeval-32b",
+  "ability": "instruction_following",
+  "reward_model": {
+    "ground_truth": "[{'instruction_id': ['new:copy_span_idx'], 'kwargs': [{'n_start': 106, 'n_end': 563, 'prompt_to_repeat': 'Write a function in Java that takes an input string and changes the case of each letter to its opposite (i.e. upper case to lower case and vice versa). Also, make your method responsive to a secondary boolean parameter: if it\\'s true, the function will not only switch the case of each letter, but it will also reverse the order of the words in the string. If it\\'s false, the function will just switch the case as before.\\n\\nExample:\\nInput: \"Hello World\", true \\nOutput: \"DLROW OLLEH\"\\n\\nYou\\'ll need to account for punctuation and white spaces in your solution. Demonstrate the operation of your function with comprehensive test coverage, including edge cases.\\n\\nString input = \"Hello World\";'}]}]",
+    "style": "rule"
+  },
+  "extra_info": {
+    "constraint": "Copy the span of words that lies between (and including) index 106 and 563, the indices are character indices!",
+    "constraint_type": "multi",
+    "index": 0,
+    "key": "ai2-adapt-dev/evol_codealpaca_heval_decontaminated_52640",
+    "split": "train"
+  }
+}

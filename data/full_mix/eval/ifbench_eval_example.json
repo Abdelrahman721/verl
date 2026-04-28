@@ -1,0 +1,19 @@
+{
+  "prompt": [
+    {
+      "content": "The response must start with a verb. make this concept clear and concise. rewrite this: As we embark on a profound exploration of the intricate art of cultivating and nurturing resilient relationships that serve as pillars of strength and support in the tapestry of our lives. As we delve deeper into this exploration, we uncover the profound significance of fostering connections that uplift and empower us, honing our communication skills to deepen intimacy, and establishing boundaries that safeguard our emotional well-being and nurture enduring bonds.",
+      "role": "user"
+    }
+  ],
+  "data_source": "allenai/IFBench_test",
+  "ability": "instruction_following",
+  "reward_model": {
+    "ground_truth": "[{'instruction_id': ['words:start_verb'], 'kwargs': [{'N': None, 'capital_frequency': None, 'capital_relation': None, 'end_phrase': None, 'first_word': None, 'forbidden_words': None, 'frequency': None, 'keyword': None, 'keyword1': None, 'keyword2': None, 'keyword3': None, 'keyword4': None, 'keyword5': None, 'keywords': None, 'language': None, 'let_frequency': None, 'let_relation': None, 'letter': None, 'm': None, 'max_words': None, 'min_words': None, 'n': None, 'n_end': None, 'n_start': None, 'nth_paragraph': None, 'num_bullets': None, 'num_highlights': None, 'num_paragraphs': None, 'num_placeholders': None, 'num_sections': None, 'num_sentences': None, 'num_words': None, 'options': None, 'percentage': None, 'postscript_marker': None, 'prompt_to_repeat': None, 'reference_text': None, 'relation': None, 'section_spliter': None, 'sep': None, 'small_n': None, 'word': None}]}]",
+    "style": "rule"
+  },
+  "extra_info": {
+    "index": 0,
+    "key": "261",
+    "split": "test"
+  }
+}

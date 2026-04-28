@@ -74,14 +74,21 @@ def compute_score(data_source, solution_str, ground_truth, extra_info=None, **kw
 
                 checker = checker_cls(instr_id)
 
+                # google/IFEval stores a superset of all possible kwargs with
+                # None for the inapplicable ones. Pass only the populated ones
+                # through to build_description — otherwise checkers that don't
+                # accept those keys raise TypeError and the score drops to 0.
                 if kw is None:
                     kw = {}
+                kw = {k: v for k, v in kw.items() if v is not None}
                 checker.build_description(**kw)
 
                 if checker.check_following(solution_str):
                     passed += 1
             except Exception:
-                logger.debug("Error evaluating constraint %s", instr_id, exc_info=True)
+                logger.warning(
+                    "Error evaluating constraint %s", instr_id, exc_info=True
+                )
 
     if total == 0:
         return 0.0
