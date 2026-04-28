@@ -27,12 +27,8 @@ def initialize_system_prompt(tokenizer, **apply_chat_template_kwargs) -> list[in
     token2 = normalize_token_ids(
         tokenizer.apply_chat_template([{"role": "user", "content": ""}] * 2, add_generation_prompt=False, tokenize=True)
     )
-
-    # token cost of adding one (empty) user turn at the end
-    user_turn_len = len(t3) - len(t2)
-
-    # prefix/system prompt tokens are the part before the first user turn
-    system_prompt = t1[: -user_turn_len] if user_turn_len > 0 else []
+    # get system prompt tokens
+    system_prompt = token1[: -(len(token2) - len(token1))]
     return system_prompt
 
 
