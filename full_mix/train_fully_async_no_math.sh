@@ -257,12 +257,12 @@ python3 -m verl.experimental.fully_async_policy.fully_async_main \
   trainer.n_gpus_per_node="${NGPUS_PER_NODE}" \
   trainer.rollout_data_dir=$HOME/verl_dumps/full_mix_no_math_rollouts_async \
   trainer.validation_data_dir=$HOME/verl_dumps/full_mix_no_math_val_async \
+  trainer.total_epochs="${TOTAL_EPOCHS}" \
+  trainer.test_freq="${TEST_FREQ}" \
   \
   rollout.nnodes="${NNODES_ROLLOUT}" \
   rollout.n_gpus_per_node="${NGPUS_PER_NODE}" \
   rollout.total_rollout_steps="${TOTAL_ROLLOUT_STEPS}" \
-  rollout.total_epochs="${TOTAL_EPOCHS}" \
-  rollout.test_freq="${TEST_FREQ}" \
   \
   async_training.staleness_threshold="${STALENESS_THRESHOLD}" \
   async_training.trigger_parameter_sync_step="${TRIGGER_SYNC_STEP}" \

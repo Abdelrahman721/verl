@@ -1,4 +1,5 @@
 pip install langdetect immutabledict nltk peft openai liger-kernel
+pip install --upgrade cupy-cuda12x
 python -c "import nltk; nltk.download('punkt_tab'); nltk.download('punkt')"
 
 export FULL_MIX_JUDGE_API_BASE="http://10.223.235.31:8000/v1"
