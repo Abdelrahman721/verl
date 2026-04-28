@@ -21,13 +21,17 @@ import numpy as np
 import ray
 import torch
 from omegaconf import DictConfig, open_dict
+from PIL import Image
+from ray.actor import ActorHandle
 from tensordict import TensorDict
 
 from verl.protocol import DataProto
 from verl.single_controller.ray.base import RayResourcePool
 from verl.trainer.ppo.reward import load_reward_manager
 from verl.utils import hf_tokenizer
+from verl.utils.experimental.reward_utils import pil_image_to_base64, prepare_query_for_multi_modal
 from verl.utils.fs import copy_to_local
+from verl.utils.ray_utils import get_event_loop
 
 from .reward_model import RewardModelManager
 
@@ -38,18 +42,17 @@ logger.setLevel(os.getenv("VERL_LOGGING_LEVEL", "WARN"))
 def migrate_legacy_reward_impl(config):
     """
     Migrate the legacy reward model implementation to the new one.
-    This is a temporary fix. A more robust one will be added.
     """
     # 1. reward workers migration
     # config.reward_model.num_workers -> config.reward.num_workers
     if config.reward_model.num_workers is not None:
         config.reward.num_workers = config.reward_model.num_workers
 
-    # 2.reward manager migration
+    # 2. reward manager migration
     # config.reward_model.reward_manager -> config.reward.reward_manager
     if config.reward_model.reward_manager is not None:
         config.reward.reward_manager.name = config.reward_model.reward_manager
-    if config.reward_model.get("reward_loop_source") is not None:
+    if config.reward_model.reward_loop_source is not None:
         config.reward.reward_manager.source = config.reward_model.reward_loop_source
         config.reward.reward_manager.module.path = config.reward_model.reward_loop_module_path
         config.reward.reward_manager.module.name = config.reward_model.reward_loop_class_name
@@ -64,18 +67,28 @@ def migrate_legacy_reward_impl(config):
     for key in ["enable", "enable_resource_pool", "n_gpus_per_node", "nnodes"]:
         if config.reward_model.get(key) is not None:
             config.reward.reward_model[key] = config.reward_model[key]
-    # for dapo reward kwargs
+    if config.reward_model.model.path is not None:
+        config.reward.reward_model.model_path = config.reward_model.model.path
+    # config.reward_model.reward_kwargs -> config.reward.reward_kwargs (for dapo algo)
     if config.reward_model.get("reward_kwargs") is not None:
-        with open_dict(config.reward.reward_model):
-            config.reward.reward_model["reward_kwargs"] = config.reward_model["reward_kwargs"]
+        with open_dict(config.reward):
+            config.reward["reward_kwargs"] = config.reward_model["reward_kwargs"]
+    # config.reward_model.rollout -> config.reward.reward_model.rollout
     legacy_rollout = config.reward_model.rollout
-    if not all(v is None for v in legacy_rollout.values()):
-        config.reward.reward_model.rollout = legacy_rollout
+    for key in legacy_rollout.keys():
+        if legacy_rollout[key] is not None:
+            config.reward.reward_model.rollout[key] = legacy_rollout[key]
 
     # 5. sandbox_fusion migration
     # config.sandbox_fusion -> reward.sandbox_fusion
     if not all(v is None for v in config.sandbox_fusion.values()):
         config.reward.sandbox_fusion = config.sandbox_fusion
+
+    # 6. delete legacy config from configs
+    with open_dict(config):
+        del config.reward_model
+        del config.custom_reward_function
+        del config.sandbox_fusion
 
     return config
 
@@ -105,9 +118,13 @@ class RewardLoopWorker:
         self.config = config
         self.reward_router_address = reward_router_address
         self._init_reward_fn()
+        self.loop = get_event_loop()
 
     def _init_reward_fn(self):
-        input_tokenizer_local_path = copy_to_local(self.config.actor_rollout_ref.model.path)
+        input_tokenizer_path = self.config.actor_rollout_ref.model.tokenizer_path
+        if input_tokenizer_path is None:
+            input_tokenizer_path = self.config.actor_rollout_ref.model.path
+        input_tokenizer_local_path = copy_to_local(input_tokenizer_path)
         self.input_tokenizer = hf_tokenizer(input_tokenizer_local_path, trust_remote_code=True)
         self.reward_model_tokenizer = None
         if self.config.reward.reward_model.enable:
@@ -190,17 +207,32 @@ class RewardLoopWorker:
         chat: list = list(data_item.non_tensor_batch["raw_prompt"])
 
         # extract response
-        response_ids = data_item.batch["responses"]
-        response_length = response_ids.shape[-1]
-        valid_response_length = data_item.batch["attention_mask"][-response_length:].sum()
-        valid_response_ids = response_ids[:valid_response_length]
+        response = data_item.batch["responses"]
+        if response.ndim == 3:
+            # handling multi-modal response
+            response_image = response
+            if isinstance(response_image, torch.Tensor):
+                response_image = response_image.float().permute(1, 2, 0).cpu().numpy()
+            assert response_image.shape[-1] == 3, "must be in HWC format"
+            response_image = (response_image * 255).round().clip(0, 255).astype(np.uint8)
+            response_image = Image.fromarray(response_image)
 
-        # decode
-        rollout_response = self.input_tokenizer.decode(valid_response_ids)
-        # remove bos and eos
-        rollout_response = rollout_response.replace(self.input_tokenizer.eos_token, "")
+            image_base64 = await self.loop.run_in_executor(None, pil_image_to_base64, response_image)
+            query = prepare_query_for_multi_modal(image_base64)
 
-        chat.append({"role": "assistant", "content": rollout_response})
+            chat.append({"role": "assistant", "content": query})
+        else:
+            response_ids = response
+            response_length = response_ids.shape[-1]
+            valid_response_length = data_item.batch["attention_mask"][-response_length:].sum()
+            valid_response_ids = response_ids[:valid_response_length]
+
+            # decode
+            rollout_response = self.input_tokenizer.decode(valid_response_ids)
+            # remove bos and eos
+            rollout_response = rollout_response.replace(self.input_tokenizer.eos_token, "")
+
+            chat.append({"role": "assistant", "content": rollout_response})
 
         rm_prompt = self.reward_model_tokenizer.apply_chat_template(
             chat,
@@ -222,12 +254,10 @@ class RewardLoopWorker:
         engine_name = self.config.reward.reward_model.rollout.name
         model_name = self.config.reward.reward_model.model_path
         if engine_name == "vllm":
-            # TODO (dyy): the "activation" has been changed to "use_activation" in vllm 0.11.2
             payloads = {
                 "model": model_name,
                 "input": disrm_prompt,
-                "activation": False,
-                # "add_special_tokens": False,  # vllm >= 0.11.2
+                "use_activation": False,
             }
             output = await self._post_request(payloads, "classify")
             rm_score = output["data"][-1]["probs"][-1]
@@ -279,6 +309,18 @@ class RewardLoopManager:
         self.reward_loop_workers_class = ray.remote(RewardLoopWorker)
         self._init_reward_loop_workers()
 
+    @property
+    def reward_loop_worker_handles(self) -> list[ActorHandle]:
+        """Return worker handles for agent loop worker to compute reward score.
+
+        Only return worker handles when reward computation can be parallelized with rollout:
+        (1) rule-based reward without reward model
+        (2) reward model with extra resource pool
+        """
+        if not self.config.reward.reward_model.enable or self.config.reward.reward_model.enable_resource_pool:
+            return self.reward_loop_workers
+        return None
+
     def _init_reward_loop_workers(self):
         self.reward_loop_workers = []
         num_workers = self.config.reward.num_workers
@@ -287,6 +329,7 @@ class RewardLoopManager:
         for i in range(num_workers):
             # Round-robin scheduling over the all nodes
             node_id = node_ids[i % len(node_ids)]
+
             self.reward_loop_workers.append(
                 self.reward_loop_workers_class.options(
                     name=f"reward_loop_worker_{i}",
@@ -312,12 +355,16 @@ class RewardLoopManager:
 
         # compute rm score
         scores = [item["reward_score"] for item in outputs_flat]
-        prompt_length = data.batch["prompts"].size(1)
-        valid_response_length = data.batch["attention_mask"][:, prompt_length:].sum(dim=1)
-        rm_scores = torch.zeros_like(data.batch["responses"], dtype=torch.float32)
-        rm_scores[torch.arange(rm_scores.size(0)), valid_response_length - 1] = torch.tensor(
-            scores, dtype=torch.float32
-        )
+        if self.config.reward.reward_manager.name == "visual":
+            # visual reward only has one score for the whole response
+            rm_scores = torch.tensor(scores, dtype=torch.float32).unsqueeze(-1)
+        else:
+            prompt_length = data.batch["prompts"].size(1)
+            valid_response_length = data.batch["attention_mask"][:, prompt_length:].sum(dim=1)
+            rm_scores = torch.zeros_like(data.batch["responses"], dtype=torch.float32)
+            rm_scores[torch.arange(rm_scores.size(0)), valid_response_length - 1] = torch.tensor(
+                scores, dtype=torch.float32
+            )
         batch = TensorDict({"rm_scores": rm_scores}, batch_size=len(data))
 
         reward_extra_infos = [output.get("reward_extra_info", {}) for output in outputs_flat]
