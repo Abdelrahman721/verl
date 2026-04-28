@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # ===== Config (override via env or scripts/dev.env) =====
-IMAGE="${IMAGE:-verlai/verl:vllm012.latest}"
+IMAGE="${IMAGE:-verlai/verl:vllm017.latest}"
 NAME="${NAME:-verl-dev}"
 WORKDIR_IN_CONTAINER="${WORKDIR_IN_CONTAINER:-/workspace/verl}"
 
