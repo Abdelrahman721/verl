@@ -32,6 +32,7 @@ for _p in (_REPO_ROOT, _FULL_MIX_DIR):
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
+import full_mix.per_source_metrics  # noqa: E402,F401  -- patches compute_data_metrics for per-source wandb curves
 from full_mix.common.think import strip_think  # noqa: E402
 from full_mix.rewards import chat as _chat     # noqa: E402
 from full_mix.rewards import gsm8k as _gsm8k   # noqa: E402
