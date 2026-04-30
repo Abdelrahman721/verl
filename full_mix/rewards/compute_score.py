@@ -182,6 +182,8 @@ def compute_score_helper(*args, **kwargs):
 
 def compute_score(*args, **kwargs):
     score = compute_score_helper(*args, **kwargs)
+    data_source = kwargs.get("data_source", args[0] if args else None)
     return {
         "score": score,
+        "data_source": data_source,
     }
