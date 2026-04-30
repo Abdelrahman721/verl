@@ -150,8 +150,7 @@ def _compute_score_batch(
 
     return scores
 
-
-def compute_score(*args, **kwargs):
+def compute_score_helper(*args, **kwargs):
     """Dual-signature entry point.
 
     VERL dispatches reward scoring differently depending on the configured
@@ -168,6 +167,7 @@ def compute_score(*args, **kwargs):
     We detect which one the caller used and route accordingly.
     """
     if "data_sources" in kwargs or (args and isinstance(args[0], (list, tuple))):
+        assert False
         data_sources = kwargs.get("data_sources", args[0] if args else None)
         solution_strs = kwargs.get("solution_strs", args[1] if len(args) > 1 else None)
         ground_truths = kwargs.get("ground_truths", args[2] if len(args) > 2 else None)
@@ -179,3 +179,9 @@ def compute_score(*args, **kwargs):
     ground_truth = kwargs.get("ground_truth", args[2] if len(args) > 2 else None)
     extra_info = kwargs.get("extra_info", args[3] if len(args) > 3 else None)
     return _score_one(data_source, solution_str, ground_truth, extra_info)
+
+def compute_score(*args, **kwargs):
+    score = compute_score_helper(*args, **kwargs)
+    return {
+        "score": score,
+    }
