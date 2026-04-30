@@ -40,7 +40,7 @@ VAL_FILES="[${DATA_DIR}/eval/gsm8k_eval.parquet,${DATA_DIR}/eval/math500_eval.pa
 
 # ---- experiment metadata ----
 PROJECT_NAME=${PROJECT_NAME:-RL-Exps}
-EXP_NAME=${EXP_NAME:-full-mix-no-math-fully-async}
+EXP_NAME=${EXP_NAME:-testing}
 
 
 # ---- sequence lengths ----
@@ -120,7 +120,7 @@ RESUME_MODE=${RESUME_MODE:-disable}
 
 
 # ---- cluster layout (rollout and trainer on DISJOINT nodes) ----
-NNODES_ROLLOUT=${NNODES_ROLLOUT:-3}
+NNODES_ROLLOUT=${NNODES_ROLLOUT:-2}
 NNODES_TRAIN=${NNODES_TRAIN:-1}
 NGPUS_PER_NODE=${NGPUS_PER_NODE:-8}
 
@@ -171,6 +171,9 @@ python3 -m verl.experimental.fully_async_policy.fully_async_main \
   algorithm.norm_adv_by_std_in_grpo="${NORM_ADV_BY_STD}" \
   algorithm.use_kl_in_reward="${USE_KL_IN_REWARD}" \
   algorithm.kl_ctrl.kl_coef="${KL_COEF}" \
+  algorithm.rollout_correction.bypass_mode=False \
+  algorithm.rollout_correction.rollout_is=token \
+  algorithm.rollout_correction.rollout_is_threshold=2.0 \
   \
   data.train_files="${TRAIN_FILES}" \
   data.val_files="${VAL_FILES}" \
