@@ -40,7 +40,7 @@ VAL_FILES="[${DATA_DIR}/eval/gsm8k_eval.parquet,${DATA_DIR}/eval/math500_eval.pa
 
 # ---- experiment metadata ----
 PROJECT_NAME=${PROJECT_NAME:-RL-Exps}
-EXP_NAME=${EXP_NAME:-testing}
+EXP_NAME=${EXP_NAME:-fresh-run-wgrok-oldchat}
 
 
 # ---- sequence lengths ----
@@ -110,7 +110,7 @@ PARTIAL_ROLLOUT=${PARTIAL_ROLLOUT:-True}
 TRAIN_PROMPT_BSZ=${TRAIN_PROMPT_BSZ:-0}
 GEN_PROMPT_BSZ=${GEN_PROMPT_BSZ:-1}
 TRAIN_MINI_BSZ=${TRAIN_MINI_BSZ:-16}
-TOTAL_ROLLOUT_STEPS=${TOTAL_ROLLOUT_STEPS:-100000}
+TOTAL_ROLLOUT_STEPS=${TOTAL_ROLLOUT_STEPS:-65000}
 TOTAL_EPOCHS=${TOTAL_EPOCHS:-10}
 TEST_FREQ=${TEST_FREQ:-20}
 SAVE_FREQ=${SAVE_FREQ:-20}
@@ -171,9 +171,6 @@ python3 -m verl.experimental.fully_async_policy.fully_async_main \
   algorithm.norm_adv_by_std_in_grpo="${NORM_ADV_BY_STD}" \
   algorithm.use_kl_in_reward="${USE_KL_IN_REWARD}" \
   algorithm.kl_ctrl.kl_coef="${KL_COEF}" \
-  algorithm.rollout_correction.bypass_mode=False \
-  algorithm.rollout_correction.rollout_is=token \
-  algorithm.rollout_correction.rollout_is_threshold=2.0 \
   \
   data.train_files="${TRAIN_FILES}" \
   data.val_files="${VAL_FILES}" \
@@ -253,7 +250,7 @@ python3 -m verl.experimental.fully_async_policy.fully_async_main \
   trainer.logger='["console","wandb"]' \
   trainer.project_name="${PROJECT_NAME}" \
   trainer.experiment_name="${EXP_NAME}" \
-  trainer.val_before_train=False \
+  trainer.val_before_train=True \
   trainer.resume_mode="${RESUME_MODE}" \
   trainer.save_freq="${SAVE_FREQ}" \
   trainer.nnodes="${NNODES_TRAIN}" \
@@ -273,3 +270,7 @@ python3 -m verl.experimental.fully_async_policy.fully_async_main \
   async_training.partial_rollout="${PARTIAL_ROLLOUT}" \
   ${RAY_ENV_FLAGS:-} \
   "$@"
+  
+  # algorithm.rollout_correction.bypass_mode=False \
+  # algorithm.rollout_correction.rollout_is=token \
+  # algorithm.rollout_correction.rollout_is_threshold=2.0 \
