@@ -3,7 +3,7 @@
 #
 # Based on verl/experimental/fully_async_policy/shell/dapo_7b_math_fsdp2_16_16.sh,
 # adapted for:
-#   - Qwen3-4B-Base actor + full_mix (ifeval/chat/safety) data
+#   - Qwen3-4B-Base actor + full_mix (ifeval/chat/safety/identity) data
 #   - max_response_length=16384 (vs DAPO 28k)
 #   - overlong_buffer_len=2048 (vs DAPO 4096)
 #   - require_batches=2 (vs DAPO 4)
@@ -34,13 +34,24 @@ MODEL_PATH=${MODEL_PATH:-Qwen/Qwen3-4B-Base}
 
 # ---- data ----
 DATA_DIR=${DATA_DIR:-/data/abdelrahman/verl/data/full_mix}
-TRAIN_FILES="[${DATA_DIR}/train/ifeval_train.parquet,${DATA_DIR}/train/chat_train.parquet,${DATA_DIR}/train/safety_train.parquet]"
-VAL_FILES="[${DATA_DIR}/eval/gsm8k_eval.parquet,${DATA_DIR}/eval/math500_eval.parquet,${DATA_DIR}/eval/ifeval_eval.parquet]"
+
+# Which chat parquet to use:
+#   chat               -> chat_train.parquet
+#   chat_with_baseline -> chat_with_baseline_train.parquet
+CHAT_VARIANT=${CHAT_VARIANT:-chat_with_baseline}
+case "$CHAT_VARIANT" in
+  chat)               _CHAT_FILE=chat_train.parquet ;;
+  chat_with_baseline) _CHAT_FILE=chat_with_baseline_train.parquet ;;
+  *) echo "CHAT_VARIANT must be 'chat' or 'chat_with_baseline'; got '$CHAT_VARIANT'" >&2; exit 2 ;;
+esac
+
+TRAIN_FILES=${TRAIN_FILES:-"[${DATA_DIR}/train/ifeval_train.parquet,${DATA_DIR}/train/${_CHAT_FILE},${DATA_DIR}/train/safety_train.parquet,${DATA_DIR}/train/identity_train.parquet]"}
+VAL_FILES=${VAL_FILES:-"[${DATA_DIR}/eval/gsm8k_eval.parquet,${DATA_DIR}/eval/math500_eval.parquet,${DATA_DIR}/eval/ifeval_eval.parquet]"}
 
 
 # ---- experiment metadata ----
 PROJECT_NAME=${PROJECT_NAME:-RL-Exps}
-EXP_NAME=${EXP_NAME:-fresh-run-wgrok-oldchat}
+EXP_NAME=${EXP_NAME:-fresh-run-wds-oldchat-is}
 
 
 # ---- sequence lengths ----
@@ -70,7 +81,7 @@ CLIP_LOW=${CLIP_LOW:-0.2}
 CLIP_HIGH=${CLIP_HIGH:-0.28}
 CLIP_RATIO_C=${CLIP_RATIO_C:-10.0}
 LR=${LR:-1e-6}
-LR_WARMUP_STEPS=${LR_WARMUP_STEPS:-10}
+LR_WARMUP_STEPS=${LR_WARMUP_STEPS:-20}
 WEIGHT_DECAY=${WEIGHT_DECAY:-0.0}
 ENTROPY_COEFF=${ENTROPY_COEFF:-0}
 GRAD_CLIP=${GRAD_CLIP:-1.0}
@@ -110,32 +121,44 @@ PARTIAL_ROLLOUT=${PARTIAL_ROLLOUT:-True}
 TRAIN_PROMPT_BSZ=${TRAIN_PROMPT_BSZ:-0}
 GEN_PROMPT_BSZ=${GEN_PROMPT_BSZ:-1}
 TRAIN_MINI_BSZ=${TRAIN_MINI_BSZ:-16}
-TOTAL_ROLLOUT_STEPS=${TOTAL_ROLLOUT_STEPS:-65000}
+TOTAL_ROLLOUT_STEPS=${TOTAL_ROLLOUT_STEPS:-100000}
 TOTAL_EPOCHS=${TOTAL_EPOCHS:-10}
 TEST_FREQ=${TEST_FREQ:-20}
 SAVE_FREQ=${SAVE_FREQ:-20}
-# auto = resume from latest checkpoint if dir exists (verl default).
-# disable = always start fresh (use after a failed run that left a partial ckpt).
-RESUME_MODE=${RESUME_MODE:-disable}
+
+# Resume policy:
+#   RESUME_FROM_PATH non-empty -> RESUME_MODE=resume_path, pass the path through.
+#   RESUME_FROM_PATH empty     -> RESUME_MODE=disable (start from MODEL_PATH).
+RESUME_FROM_PATH=${RESUME_FROM_PATH:-}
+if [[ -n "$RESUME_FROM_PATH" ]]; then
+  RESUME_MODE=${RESUME_MODE:-resume_path}
+else
+  RESUME_MODE=${RESUME_MODE:-disable}
+fi
+
+
+# ---- rollout / validation dump dirs ----
+ROLLOUT_DATA_DIR=${ROLLOUT_DATA_DIR:-$HOME/verl_dumps/full_mix_no_math_rollouts_async}
+VALIDATION_DATA_DIR=${VALIDATION_DATA_DIR:-$HOME/verl_dumps/full_mix_no_math_val_async}
 
 
 # ---- cluster layout (rollout and trainer on DISJOINT nodes) ----
-NNODES_ROLLOUT=${NNODES_ROLLOUT:-2}
-NNODES_TRAIN=${NNODES_TRAIN:-1}
+NNODES_ROLLOUT=${NNODES_ROLLOUT:-3}
+NNODES_TRAIN=${NNODES_TRAIN:-2}
 NGPUS_PER_NODE=${NGPUS_PER_NODE:-8}
 
 
 # ---- parallelism (dynamic-bsz + Ulysses SP + vLLM TP) ----
 USE_DYNAMIC_BSZ=${USE_DYNAMIC_BSZ:-True}
-ACTOR_PPO_MAX_TOKEN_LEN=${ACTOR_PPO_MAX_TOKEN_LEN:-$(( (MAX_PROMPT_LEN + MAX_RESPONSE_LEN) * 2 ))}
-INFER_PPO_MAX_TOKEN_LEN=${INFER_PPO_MAX_TOKEN_LEN:-$(( (MAX_PROMPT_LEN + MAX_RESPONSE_LEN) * 3 ))}
-GEN_TP=${GEN_TP:-1}
-SP_SIZE=${SP_SIZE:-1}
-FSDP_SIZE=${FSDP_SIZE:-8}
+ACTOR_PPO_MAX_TOKEN_LEN=${ACTOR_PPO_MAX_TOKEN_LEN:-$(( (MAX_PROMPT_LEN + MAX_RESPONSE_LEN) * 1 ))}
+INFER_PPO_MAX_TOKEN_LEN=${INFER_PPO_MAX_TOKEN_LEN:-$(( (MAX_PROMPT_LEN + MAX_RESPONSE_LEN) * 2 ))}
+GEN_TP=${GEN_TP:-4}
+SP_SIZE=${SP_SIZE:-2}
+FSDP_SIZE=${FSDP_SIZE:-16}
 
 
 # ---- offloading ----
-ACTOR_OFFLOAD=${ACTOR_OFFLOAD:-False}
+ACTOR_OFFLOAD=${ACTOR_OFFLOAD:-True}
 REF_OFFLOAD=${REF_OFFLOAD:-True}
 
 
@@ -143,10 +166,10 @@ REF_OFFLOAD=${REF_OFFLOAD:-True}
 # max_num_seqs caps concurrent sequences per engine. vLLM v1 defaults to 1024,
 # which OOMs during warmup at our context length. 128 is plenty for streaming
 # at N_SAMPLES_PER_PROMPT=16 and our queue depth.
-GPU_MEM_UTIL=${GPU_MEM_UTIL:-0.70}
+GPU_MEM_UTIL=${GPU_MEM_UTIL:-0.85}
 ENABLE_CHUNKED_PREFILL=${ENABLE_CHUNKED_PREFILL:-True}
 MAX_NUM_BATCHED_TOKENS=${MAX_NUM_BATCHED_TOKENS:-$(( MAX_PROMPT_LEN + MAX_RESPONSE_LEN ))}
-MAX_NUM_SEQS=${MAX_NUM_SEQS:-128}
+MAX_NUM_SEQS=${MAX_NUM_SEQS:-64}
 
 
 # ---- reward dispatcher ----
@@ -154,7 +177,7 @@ REWARD_FN_PATH=${REWARD_FN_PATH:-/workspace/verl/full_mix/rewards/compute_score.
 REWARD_FN_NAME=${REWARD_FN_NAME:-compute_score}
 
 
-# ---- judge (chat + safety rewards call the judge during training) ----
+# ---- judge (chat + safety + identity rewards call the judge during training) ----
 export FULL_MIX_JUDGE_API_BASE=${FULL_MIX_JUDGE_API_BASE:-http://127.0.0.1:8000/v1}
 export FULL_MIX_JUDGE_API_KEY=${FULL_MIX_JUDGE_API_KEY:-EMPTY}
 export FULL_MIX_JUDGE_MODEL=${FULL_MIX_JUDGE_MODEL:-Qwen/Qwen2.5-7B-Instruct}
@@ -171,6 +194,9 @@ python3 -m verl.experimental.fully_async_policy.fully_async_main \
   algorithm.norm_adv_by_std_in_grpo="${NORM_ADV_BY_STD}" \
   algorithm.use_kl_in_reward="${USE_KL_IN_REWARD}" \
   algorithm.kl_ctrl.kl_coef="${KL_COEF}" \
+  algorithm.rollout_correction.bypass_mode=False \
+  algorithm.rollout_correction.rollout_is=token \
+  algorithm.rollout_correction.rollout_is_threshold=2.0 \
   \
   data.train_files="${TRAIN_FILES}" \
   data.val_files="${VAL_FILES}" \
@@ -252,11 +278,12 @@ python3 -m verl.experimental.fully_async_policy.fully_async_main \
   trainer.experiment_name="${EXP_NAME}" \
   trainer.val_before_train=True \
   trainer.resume_mode="${RESUME_MODE}" \
+  ${RESUME_FROM_PATH:++trainer.resume_from_path=${RESUME_FROM_PATH}} \
   trainer.save_freq="${SAVE_FREQ}" \
   trainer.nnodes="${NNODES_TRAIN}" \
   trainer.n_gpus_per_node="${NGPUS_PER_NODE}" \
-  trainer.rollout_data_dir=$HOME/verl_dumps/full_mix_no_math_rollouts_async \
-  trainer.validation_data_dir=$HOME/verl_dumps/full_mix_no_math_val_async \
+  trainer.rollout_data_dir="${ROLLOUT_DATA_DIR}" \
+  trainer.validation_data_dir="${VALIDATION_DATA_DIR}" \
   trainer.total_epochs="${TOTAL_EPOCHS}" \
   trainer.test_freq="${TEST_FREQ}" \
   \
@@ -270,7 +297,3 @@ python3 -m verl.experimental.fully_async_policy.fully_async_main \
   async_training.partial_rollout="${PARTIAL_ROLLOUT}" \
   ${RAY_ENV_FLAGS:-} \
   "$@"
-  
-  # algorithm.rollout_correction.bypass_mode=False \
-  # algorithm.rollout_correction.rollout_is=token \
-  # algorithm.rollout_correction.rollout_is_threshold=2.0 \
