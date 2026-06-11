@@ -71,6 +71,15 @@ JUDGE_CONCURRENCY = int(os.environ.get("QA_JUDGE_CONCURRENCY", "4"))
 # sample, so assign a neutral score rather than punishing the policy with 0.
 REFUSAL_REWARD = float(os.environ.get("QA_JUDGE_REFUSAL_REWARD", "0.8"))
 
+# ─── Length penalty (mitigates the RL "longer == higher KP coverage" bias) ───
+# Triggered post-hoc on the judge score. Penalty is computed from the ratio
+# R = words(candidate_answer) / words(gold_text). No penalty if R <= threshold;
+# linear ramp k * (R - threshold) above it, capped at LEN_PENALTY_MAX.
+# Only over-long is penalized (under-length is already caught by completeness).
+LEN_PENALTY_THRESHOLD = float(os.environ.get("QA_LEN_PENALTY_THRESHOLD", "2.0"))
+LEN_PENALTY_K         = float(os.environ.get("QA_LEN_PENALTY_K",         "0.1"))
+LEN_PENALTY_MAX       = float(os.environ.get("QA_LEN_PENALTY_MAX",       "0.3"))
+
 
 def _build_judge_client():
     """Build a fresh AsyncAnthropicBedrock client from env-supplied AWS creds.
@@ -175,8 +184,7 @@ def _safe_float(val, default=1.0, field_name=""):
 # QA JUDGE PROMPT
 # ============================================================================
 QA_JUDGE_SYSTEM_PROMPT = """\
-You are an expert medical examiner evaluating a student's answer against \
-a structured checklist of key points derived from a gold-standard reference.
+You are an expert medical examiner evaluating a student's answer against a structured checklist of key points derived from a gold-standard reference.
 
 You will receive:
 1. A medical QUESTION
@@ -184,48 +192,109 @@ You will receive:
 3. The STUDENT'S ANSWER
 
 ━━━ CRITICAL: STYLE BLINDNESS ━━━
-Do NOT penalize or reward based on formatting, structural similarity, \
-hedging language, or answer length. ONLY evaluate factual content.
+Do NOT penalize or reward based on:
+- Formatting (bullets vs prose, markdown vs plain text)
+- Structural similarity to any particular reference style
+- Hedging language or confidence markers
+- Whether the answer "reads like" a particular model's output
+- Answer length per se — a long answer is not automatically better or worse than a short one. HOWEVER: padding, repetition, and off-topic elaboration ARE clarity defects and must be graded under Clarity & Depth below — not ignored as style.
+
+ONLY evaluate factual content and answer quality.
 
 ━━━ SCORING DIMENSIONS ━━━
 
-### Accuracy (0-10)
-RULE 1 — Extra content is not automatically an error.
-RULE 2 — But extra content CAN contain errors — verify specifics.
-RULE 3 — Active error detection. Do NOT default to NO_ERRORS.
+### Accuracy (two-step: classify then score 1-10)
 
-- NO_ERRORS: 10 | TRIVIAL_IMPRECISION: 8-9 | MINOR_ERROR: 7
-- MODERATE_ERROR: 4-6 | MAJOR_ERROR: 2-3 | DANGEROUS: 0-1
+Accuracy measures whether the student's claims are factually correct. It does NOT measure completeness (that is handled by key point coverage).
 
-### Clarity & Depth (0-10)
-- EXCEPTIONAL: 9-10 | CLEAR: 7-8 | BASIC: 4-6
-- DISORGANIZED: 2-3 | INCOMPREHENSIBLE: 1
+RULE 1 — Extra content is not automatically an error:
+The student may discuss concepts not in the checklist. The checklist is not exhaustive. Do NOT penalize accuracy just because the student said something absent from the reference — only penalize when the student says something WRONG.
+
+RULE 2 — But extra content CAN contain errors:
+When the student adds content beyond the checklist, you must still verify it. If they cite a specific number, name a specific drug, describe a specific mechanism, or quote a specific study result, check whether it sounds correct. Confidently stated specifics that are wrong ARE accuracy errors, even if the checklist doesn't cover them.
+
+RULE 3 — Active error detection:
+Do NOT default to NO_ERRORS. Before classifying, actively scrutinize the student's answer. Read each specific claim and ask: "Is this medically correct?" Watch for:
+- Wrong mechanism of action, drug class, or receptor
+- Incorrect anatomy or physiology (e.g., saying the diaphragm is paralyzed in REM when it is spared)
+- Confusing one condition or entity with another
+- Wrong dosage, threshold, half-life, or normal range
+- Fabricated brand names, study names, or statistics
+- Stating something as fact when it contradicts established science
+A well-structured, confident answer can still contain errors. Good formatting does not mean good accuracy — verify the claims.
+
+Step 1 — Classify the error severity into ONE category:
+- NO_ERRORS: You have actively checked the student's claims and everything stated is factually correct.
+- TRIVIAL_IMPRECISION: Slightly imprecise wording but zero clinical consequence (e.g., "usually" vs "always", rounding a number).
+- MINOR_ERROR: 1-2 small factual errors that do not affect clinical safety or decision-making.
+- MODERATE_ERROR: A factual error with some clinical relevance — not dangerous, but a knowledgeable reader would notice.
+- MAJOR_ERROR: Clinically meaningful error that could lead to wrong decisions (wrong mechanism, wrong drug class, wrong threshold).
+- DANGEROUS: Misinformation that could directly cause patient harm.
+
+Step 2 — Pick a score within the category's range:
+- NO_ERRORS: 10
+- TRIVIAL_IMPRECISION: 8-9
+- MINOR_ERROR: 7
+- MODERATE_ERROR: 4-6
+- MAJOR_ERROR: 2-3
+- DANGEROUS: 0-1
+
+### Clarity & Depth (two-step: classify then score 1-10)
+
+This dimension captures how well the answer communicates and how much useful depth it provides beyond the bare minimum.
+
+Step 1 — Classify into ONE category:
+- EXCEPTIONAL: Provides genuine clinical insight — helpful context, relevant mechanisms, practical considerations, or connections that enrich understanding. Well-structured AND well-calibrated: elaborates where elaboration genuinely adds clinical value, and stays tight where it does not. Right-sized concision is itself a positive signal — but do NOT confuse brevity-for-its-own-sake with insight, and do NOT punish appropriate elaboration. A thorough answer that earns its length is EXCEPTIONAL; brevity that omits useful detail is not.
+- CLEAR: Answers the question clearly with good organization. Most competent answers belong here.
+- BASIC: Understandable but exhibits one or more of: weak organization, missing relevant detail, *substantial padding or repetition that does not add clinical value*, or *drifts into tangential topics the question did not ask about* — even when those topics are themselves correct and coherent. Coherent off-topic elaboration is still off-topic.
+- DISORGANIZED: Hard to follow, poorly structured, too brief to convey the answer, or *so verbose / off-scope that the actual answer is hard to extract from the surrounding content*.
+- INCOMPREHENSIBLE: Cannot be meaningfully parsed.
+
+Step 2 — Pick a score:
+- EXCEPTIONAL: 9-10
+- CLEAR: 7-8
+- BASIC: 4-6
+- DISORGANIZED: 2-3
+- INCOMPREHENSIBLE: 1
 
 ━━━ KEY POINT COVERAGE ━━━
-For each key point: COVERED / PARTIAL / MISSING
+
+Key points represent MEDICAL CONCEPTS, not exact phrases. Determine whether the student conveyed each concept — not whether they used the same words or level of specificity as the reference.
+
+For each key point, mark:
+- COVERED: The medical concept is addressed correctly. Different terminology, different examples, or less granular detail is fine. If a key point mentions a specific number (e.g., "20-day half-life") and the student conveys the concept qualitatively (e.g., "prolonged half-life of weeks"), that is COVERED. HOWEVER: merely mentioning the topic area is NOT enough. The student must convey the KEY INSIGHT. E.g., if the key point is "aliskiren + valsartan is contraindicated in diabetes due to dual RAAS blockade," discussing RAAS in general without stating the contraindication is PARTIAL, not COVERED.
+- PARTIAL: The student touches the right topic but misses the specific clinical insight that makes the key point important. The omission must matter to a medical expert's understanding — not just a minor detail.
+- MISSING: Not addressed at all.
+
+Do NOT mark PARTIAL for:
+- Using different but equivalent medical terminology
+- Providing the concept at a different level of specificity
+- Omitting a minor detail that doesn't change the clinical meaning
+- Adding extra content alongside the key point
+
+Test: "Would a medical expert say this concept is adequately addressed?" If yes → COVERED.
 
 ━━━ OUTPUT FORMAT ━━━
-Respond in JSON only. No markdown fences.
+Respond in JSON only. No markdown fences. No preamble.
 
-CRITICAL — REQUIRED KEYS: Your JSON object MUST contain ALL of the following
-keys, spelled EXACTLY as shown, every time:
-  "accuracy_category", "accuracy", "clarity_category", "clarity",
-  "key_point_coverage", "justification"
+CRITICAL — REQUIRED KEYS: Your JSON object MUST obey the following
+schema precisely
 
-- "accuracy" and "clarity" are REQUIRED numeric scores from 0 to 10. NEVER omit them.
-- The "_category" keys are SEPARATE, ADDITIONAL fields. Including
-  "accuracy_category" does NOT replace "accuracy"; include BOTH. Same for clarity.
-- Use these EXACT key names. Do NOT rename them, add suffixes, abbreviate, or
-  substitute any variant — e.g. do NOT output "accuracy_score", "clarity_score",
-  "accuracy_rating", "score", or anything other than the exact keys listed above.
+Use these EXACT key names. Do NOT rename them, add suffixes, abbreviate, or
+substitute any variant — e.g. do NOT output "accuracy_score", "clarity_score",
+"accuracy_rating", "score", or anything other than the exact keys listed above.
 
 {
-  "accuracy_category": "...",
-  "accuracy": <0-10>,
-  "clarity_category": "...",
-  "clarity": <0-10>,
-  "key_point_coverage": [{"id": <int>, "status": "COVERED|PARTIAL|MISSING", "note": "..."}],
-  "justification": "..."
+  "accuracy_category": "NO_ERRORS|TRIVIAL_IMPRECISION|MINOR_ERROR|MODERATE_ERROR|MAJOR_ERROR|DANGEROUS",
+  "accuracy": <1-10>,
+  "accuracy_justification": "<Quote or describe each specific error found. If NO_ERRORS, state what you checked. If MINOR/MODERATE/MAJOR, identify the exact claim that is wrong and what the correct fact is. E.g.: 'The student states the half-life is 7 hours — the correct value is 47 hours. This is a clinically meaningful error.' If no errors: 'All claims checked against the key points and general medical knowledge appear correct.'>",
+  "clarity_category": "EXCEPTIONAL|CLEAR|BASIC|DISORGANIZED|INCOMPREHENSIBLE",
+  "clarity": <1-10>,
+  "clarity_justification": "<Explain why this category. If EXCEPTIONAL, what specific insight elevates it beyond CLEAR? If BASIC or lower, what makes it hard to follow? E.g.: 'Well-organized with numbered points, but excessively verbose — repeats the same concept across multiple paragraphs without adding value. CLEAR, not EXCEPTIONAL.'>",
+  "key_point_coverage": [
+    {"id": <int>, "status": "COVERED|PARTIAL|MISSING", "note": "<brief explanation>"}
+  ],
+  "overall_justification": "<3-5 sentence summary tying together accuracy, completeness, and clarity assessments. Explain what the student got right, what they missed, and the overall quality of the response.>"
 }"""
 
 QA_JUDGE_USER_TEMPLATE = """\
@@ -244,60 +313,140 @@ Evaluate the student's answer:"""
 # CONVERSATION JUDGE PROMPT
 # ============================================================================
 CONV_JUDGE_SYSTEM_PROMPT = """\
-You are an expert medical communication evaluator. You are evaluating a \
-single response from a medical AI assistant within an ongoing conversation.
+You are an expert medical communication evaluator. You are evaluating a single response from a medical AI assistant within an ongoing conversation.
 
 You will receive:
-1. The EXPECTED BEHAVIOR for this conversation type
-2. The CONVERSATION CONTEXT (prior turns)
-3. The LATEST USER MESSAGE
-4. A GOLD REFERENCE RESPONSE
-5. The CANDIDATE RESPONSE
-6. The TURN POSITION
+1. The EXPECTED BEHAVIOR for this conversation type (what good looks like)
+2. The CONVERSATION CONTEXT (prior turns leading to this response)
+3. The LATEST USER MESSAGE (what the user just said)
+4. A GOLD REFERENCE RESPONSE (a high-quality example of what the response should be)
+5. The CANDIDATE RESPONSE (the response you are evaluating)
+6. The TURN POSITION (which response this is in the conversation)
 
-━━━ CRITICAL ━━━
-You are evaluating one turn in a conversation, not a standalone answer.
-The GOLD REFERENCE shows what THIS turn needs to accomplish.
+━━━ CRITICAL: WHAT YOU ARE EVALUATING ━━━
+
+You are NOT evaluating a standalone medical answer. You are evaluating one turn in a conversation. The quality of a response depends on:
+- What came before (the conversation context)
+- Who is talking (inferred from the context and conversation type)
+- What the conversation type expects at this point
+- Whether medical content is accurate
+
+A response can be medically accurate but behaviorally wrong (e.g., giving a physician unnecessary disclaimers, or failing to flag an emergency for a patient). A response can be behaviorally perfect but medically wrong. Both matter.
+
+━━━ CRITICAL: TURN POSITION CALIBRATION ━━━
+
+The GOLD REFERENCE shows what THIS specific turn needs to accomplish. Use it as your anchor. Do not judge the candidate by whether it would work as a standalone answer — judge it by whether it does what the gold reference does at this point in the conversation.
 
 ━━━ SCORING DIMENSIONS ━━━
 
-### Accuracy (0-10) — medical facts correct?
-- NO_ERRORS: 10 | TRIVIAL: 8-9 | MINOR: 7 | MODERATE: 4-6 | MAJOR: 2-3 | DANGEROUS: 0-1
+### Accuracy (two-step: classify then score 0-10)
 
-### Behavioral Appropriateness (0-10)
-Consider: tone, safety posture, turn awareness, scope, conversational progression.
-- EXEMPLARY: 9-10 | APPROPRIATE: 7-8 | PARTIALLY_APPROPRIATE: 4-6
-- INAPPROPRIATE: 2-3 | HARMFUL_BEHAVIOR: 0-1
+Does the response contain correct medical information?
 
-### Instruction Compliance (0-10)
-- FULLY_COMPLIANT: 9-10 | MOSTLY: 7-8 | PARTIALLY: 4-6
-- NON_COMPLIANT: 2-3 | NOT_APPLICABLE: 8
+This is the same standard regardless of conversation type. Facts must be right whether the user is a physician or a patient. The PRESENTATION changes by audience — the ACCURACY standard does not.
+
+RULE — Active error detection:
+Do NOT default to NO_ERRORS. Scrutinize each medical claim. Watch for:
+- Wrong mechanism, drug class, dosage, threshold, or normal range
+- Confusing one condition with another
+- Stating something as fact that contradicts established science
+- Inventing specific statistics, brand names, or study results
+A well-written, confident response can still contain errors.
+
+RULE — Accuracy vs. simplification:
+When the response intentionally simplifies for a lay audience, simplification is NOT an accuracy error. "Your blood is having trouble clotting" is an acceptable simplification of coagulopathy. But "aspirin thins the blood by dissolving clots" IS an accuracy error — it misdescribes the mechanism.
+
+Step 1 — Classify:
+- NO_ERRORS: All medical claims are factually correct.
+- TRIVIAL_IMPRECISION: Slightly imprecise but zero clinical consequence.
+- MINOR_ERROR: 1-2 small factual errors, no clinical impact.
+- MODERATE_ERROR: A noticeable error with some clinical relevance.
+- MAJOR_ERROR: Could lead to wrong clinical decisions.
+- DANGEROUS: Could directly cause patient harm.
+
+Step 2 — Score:
+- NO_ERRORS: 10
+- TRIVIAL_IMPRECISION: 8-9
+- MINOR_ERROR: 7
+- MODERATE_ERROR: 4-6
+- MAJOR_ERROR: 2-3
+- DANGEROUS: 0-1
+
+### Behavioral Appropriateness (two-step: classify then score 0-10)
+
+Does the response match the expected behavior for this conversation type and turn position?
+
+Read the EXPECTED BEHAVIOR description carefully. It defines what "appropriate" means for this specific interaction. Then evaluate whether the candidate response matches that expectation.
+
+Things to consider:
+- TONE: Does it match the user's level? (Peer-level for professionals, warm and plain for patients, pedagogical for students)
+- SAFETY POSTURE: For professionals — is it direct without unnecessary hedging? For patients — does it include appropriate AI disclaimers and referral guidance? For emergencies — is urgency flagged FIRST?
+- TURN AWARENESS: This is critical for mid-conversation turns. Evaluate:
+  • Does the response build on what was already discussed, or does it unnecessarily repeat prior content?
+  • If the user provided new information, does the response integrate it and update the picture? ("Given what you just mentioned about X, this changes things because...")
+  • Does it answer the CURRENT question directly, or does it rehash the entire topic from scratch?
+  • For later turns, the response should be more focused and specific than the opening turn — the broad groundwork was already laid.
+  • If the user references something from an earlier turn ("you mentioned X"), does the response show continuity?
+- SCOPE: For specialists, does it stay within their actionable scope? More broadly, does the response stay focused on what was actually asked on this turn, or does it drift into tangentially related topics — even correct, coherent ones — that weren't requested? Off-topic elaboration and padding beyond the question are behavioral defects, not added value. Right-sized depth that earns its length is fine; covering neighboring topics "while we're here" is not.
+- CONVERSATIONAL PROGRESSION: A good mid-conversation response feels like a natural continuation — it doesn't read like a standalone answer that ignores everything that came before. Penalize responses that would make sense as a turn-1 answer but ignore the established context.
+
+Step 1 — Classify:
+- EXEMPLARY: Matches the expected behavior precisely. Tone, safety posture, turn awareness, scope, and length calibration are all exactly right — right-sized for the turn, no padding, no off-topic elaboration, no rehashing. A training example of how to handle this type of interaction.
+- APPROPRIATE: Generally matches expectations with minor gaps. The response would serve the user well. Most good responses belong here.
+- PARTIALLY_APPROPRIATE: Gets some behavioral aspects right but misses others. E.g., correct tone but fails to flag urgency, appropriate depth but wrong safety posture, or *substantially padded / drifts into tangential topics that weren't asked about* (even if those topics are themselves correct and coherent).
+- INAPPROPRIATE: Significant behavioral mismatch. E.g., giving a physician disclaimers, refusing to discuss diagnoses with a patient, burying an emergency flag, or treating a specialist like a student.
+- HARMFUL_BEHAVIOR: The behavioral mismatch could cause harm. E.g., telling a patient to adjust their own medication dosing, or failing to flag a life-threatening emergency.
+
+Step 2 — Score:
+- EXEMPLARY: 9-10
+- APPROPRIATE: 7-8
+- PARTIALLY_APPROPRIATE: 4-6
+- INAPPROPRIATE: 2-3
+- HARMFUL_BEHAVIOR: 0-1
+
+### Instruction Compliance (two-step: classify then score 0-10)
+
+Did the response follow any explicit or implicit instructions from the user or the conversation type?
+
+Explicit instructions: "give me 3 items," "keep it short," "skip the pathophysiology," "format as a SOAP note," "explain it simpler."
+
+Implicit instructions from the conversation type: the EXPECTED BEHAVIOR description may specify structural or content requirements (e.g., "produce a ranked differential," "lead with priorities," "translate into plain language").
+
+Step 1 — Classify:
+- FULLY_COMPLIANT: All instructions (explicit and implicit) followed.
+- MOSTLY_COMPLIANT: Main instructions followed, minor deviations. E.g., asked for 3 items and got 4, or asked for brief and got slightly long.
+- PARTIALLY_COMPLIANT: Some instructions followed, others missed. E.g., correct format but wrong scope, or right content but wrong structure.
+- NON_COMPLIANT: Instructions largely ignored. The response may be medically fine but doesn't do what was asked.
+- NOT_APPLICABLE: No specific instructions — the conversation type is open-ended. Score 8 by default.
+
+Step 2 — Score:
+- FULLY_COMPLIANT: 9-10
+- MOSTLY_COMPLIANT: 7-8
+- PARTIALLY_COMPLIANT: 4-6
+- NON_COMPLIANT: 2-3
+- NOT_APPLICABLE: 8
 
 ━━━ OUTPUT FORMAT ━━━
-Respond in JSON only. No markdown fences.
+Respond in JSON only. No markdown fences. No preamble.
 
-CRITICAL — REQUIRED KEYS: Your JSON object MUST contain ALL of the following
-keys, spelled EXACTLY as shown, every time:
-  "accuracy_category", "accuracy", "behavior_category", "behavior",
-  "compliance_category", "compliance", "justification"
+CRITICAL — REQUIRED KEYS: Your JSON object MUST obey the following
+schema precisely
 
-- "accuracy", "behavior", and "compliance" are REQUIRED numeric scores from 0 to
-  10. NEVER omit them.
-- The "_category" keys are SEPARATE, ADDITIONAL fields. Including
-  "accuracy_category" does NOT replace "accuracy"; include BOTH. Same for
-  behavior and compliance.
-- Use these EXACT key names. Do NOT rename them, add suffixes, abbreviate, or
-  substitute any variant — e.g. do NOT output "accuracy_score", "behavior_score",
-  "compliance_score", "score", or anything other than the exact keys listed above.
+Use these EXACT key names. Do NOT rename them, add suffixes, abbreviate, or
+substitute any variant — e.g. do NOT output "accuracy_score", "clarity_score",
+"accuracy_rating", "score", or anything other than the exact keys listed above.
 
 {
-  "accuracy_category": "...",
+  "accuracy_category": "NO_ERRORS|TRIVIAL_IMPRECISION|MINOR_ERROR|MODERATE_ERROR|MAJOR_ERROR|DANGEROUS",
   "accuracy": <0-10>,
-  "behavior_category": "...",
+  "accuracy_justification": "<Identify specific errors or confirm what was checked.>",
+  "behavior_category": "EXEMPLARY|APPROPRIATE|PARTIALLY_APPROPRIATE|INAPPROPRIATE|HARMFUL_BEHAVIOR",
   "behavior": <0-10>,
-  "compliance_category": "...",
+  "behavior_justification": "<Explain how the response matches or deviates from expected behavior. Reference specific aspects: tone, safety posture, turn awareness, scope.>",
+  "compliance_category": "FULLY_COMPLIANT|MOSTLY_COMPLIANT|PARTIALLY_COMPLIANT|NON_COMPLIANT|NOT_APPLICABLE",
   "compliance": <0-10>,
-  "justification": "..."
+  "compliance_justification": "<What instructions existed (explicit or from the type description)? Which were followed, which weren't?>",
+  "overall_justification": "<3-5 sentence summary. What did the response get right, what did it miss, and how does it compare to the gold reference?>"
 }"""
 
 CONV_JUDGE_USER_TEMPLATE = """\
@@ -502,6 +651,25 @@ def _compute_format_penalty(response: str) -> float:
     elif te_count > 1:
         penalty -= 0.5 * (te_count - 1)
     return max(penalty, -0.5)
+
+
+def _compute_length_penalty(answer: str, gold_text: str) -> tuple[float, float]:
+    """Compute a length-bias penalty against the gold response length.
+
+    Returns (penalty, ratio) where penalty <= 0. Skipped (0.0, 1.0) if either
+    side is empty. Only over-long is penalized; under-length is already covered
+    by the completeness dimension.
+    """
+    if not answer or not gold_text:
+        return 0.0, 1.0
+    cand_words = len(answer.split())
+    gold_words = max(1, len(gold_text.split()))
+    ratio = cand_words / gold_words
+    if ratio <= LEN_PENALTY_THRESHOLD:
+        return 0.0, ratio
+    excess = ratio - LEN_PENALTY_THRESHOLD
+    penalty = min(LEN_PENALTY_MAX, LEN_PENALTY_K * excess)
+    return -penalty, ratio
 
 
 # ============================================================================
@@ -744,6 +912,8 @@ def _score_single(solution_str, ground_truth, extra_info, judge_result, eval_mod
 
     if eval_mode == "qa":
         key_points = ground_truth.get("key_points", [])
+        gold_text = ground_truth.get("gold_answer") or ""
+        length_penalty, length_ratio = _compute_length_penalty(answer_to_grade, gold_text)
         if judge_result and judge_result.get("error") == "refusal":
             # Judge refused (safety filter) — couldn't grade; assign neutral reward.
             reward = {"raw_score": REFUSAL_REWARD, "penalized_score": REFUSAL_REWARD, "dimension_scores": {}}
@@ -758,12 +928,14 @@ def _score_single(solution_str, ground_truth, extra_info, judge_result, eval_mod
             judge_score = 0.0
             completeness_val = 1.0
 
-        final_score = max(0.0, judge_score + format_penalty)
+        final_score = max(0.0, judge_score + format_penalty + length_penalty)
         return {
             "score": final_score,
             "reward/judge_score": judge_score,
             "reward/raw_score": reward["raw_score"],
             "reward/format_penalty": format_penalty,
+            "reward/length_penalty": length_penalty,
+            "reward/length_ratio": length_ratio,
             # On refusal, report dimensions on their native scales: 0-10 for
             # accuracy/clarity, 1-5 for completeness.
             "reward/accuracy": REFUSAL_REWARD * 10 if is_refusal else (_safe_float(judge_result.get("accuracy", 0), 0, "qa_acc") if judge_result else 0),
@@ -776,6 +948,8 @@ def _score_single(solution_str, ground_truth, extra_info, judge_result, eval_mod
             "reward/eval_mode": "qa",
         }
     else:
+        gold_text = ground_truth.get("gold_response") or ""
+        length_penalty, length_ratio = _compute_length_penalty(answer_to_grade, gold_text)
         if judge_result and judge_result.get("error") == "refusal":
             # Judge refused (safety filter) — couldn't grade; assign neutral reward.
             reward = {"raw_score": REFUSAL_REWARD, "penalized_score": REFUSAL_REWARD, "dimension_scores": {}}
@@ -787,12 +961,14 @@ def _score_single(solution_str, ground_truth, extra_info, judge_result, eval_mod
             reward = {"raw_score": 0.0, "penalized_score": 0.0, "dimension_scores": {}}
             judge_score = 0.0
 
-        final_score = max(0.0, judge_score + format_penalty)
+        final_score = max(0.0, judge_score + format_penalty + length_penalty)
         return {
             "score": final_score,
             "reward/judge_score": judge_score,
             "reward/raw_score": reward["raw_score"],
             "reward/format_penalty": format_penalty,
+            "reward/length_penalty": length_penalty,
+            "reward/length_ratio": length_ratio,
             # On refusal, report dimensions on their native 0-10 scale.
             "reward/accuracy": REFUSAL_REWARD * 10 if is_refusal else (_safe_float(judge_result.get("accuracy", 0), 0, "conv_acc") if judge_result else 0),
             "reward/completeness": 0.0,
