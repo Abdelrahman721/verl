@@ -1,18 +1,29 @@
 """
-Reward scoring for medical QA + conversations using LLM-as-a-judge (Bedrock).
+Reward scoring for medical QA + conversations using LLM-as-a-judge (OpenAI).
 
-This is the Anthropic-Bedrock variant of qa.py — same scoring, same prompts,
-same entry point (compute_score), only the judge client changes:
-AsyncOpenAI -> AsyncAnthropicBedrock.
+This is the OpenAI variant of qa_bedrock.py — IDENTICAL scoring, IDENTICAL
+prompts, IDENTICAL entry point (compute_score), IDENTICAL reward dict shape,
+IDENTICAL retry / refusal / parse / repair / validation logic. The ONLY
+thing that changes vs. qa_bedrock.py is the library used to contact the judge:
+AsyncAnthropicBedrock -> AsyncOpenAI (pointed at api.openai.com).
 
-Required env vars (read at first judge call, then cached):
-  QA_JUDGE_AWS_ACCESS_KEY   AWS access key id
-  QA_JUDGE_AWS_SECRET_KEY   AWS secret access key
-  QA_JUDGE_AWS_REGION       AWS region (e.g. "eu-central-1")
+Required env vars (read at first judge call):
+  QA_JUDGE_OPENAI_API_KEY   OpenAI API key. If unset, falls back to the
+                            standard OPENAI_API_KEY (the openai SDK's own
+                            convention), so you can reuse an existing key
+                            without exporting a judge-specific one.
 Optional:
-  QA_JUDGE_MODEL            Bedrock model / inference-profile id
-                            (default: "eu.anthropic.claude-sonnet-4-6")
-  QA_JUDGE_MAX_TOKENS       (default: 32768)
+  QA_JUDGE_OPENAI_BASE_URL  Override the OpenAI base URL (e.g. for Azure
+                            OpenAI or a corporate proxy). Leave unset to use
+                            the SDK default (https://api.openai.com/v1).
+  QA_JUDGE_MODEL            OpenAI model id (default: "gpt-5.4-mini")
+  QA_JUDGE_MAX_TOKENS       (default: 16384)
+  QA_JUDGE_CONCURRENCY      (default: 4)
+  QA_JUDGE_REFUSAL_REWARD   (default: 0.5)
+  QA_JUDGE_REFUSAL_DIR      dump dir for refused judge calls (default: off)
+  QA_LEN_PENALTY_THRESHOLD  (default: 2.0)
+  QA_LEN_PENALTY_K          (default: 0.1)
+  QA_LEN_PENALTY_MAX        (default: 0.3)
 
 Handles two eval_modes:
 - "qa": Single-turn medical Q&A with key points (accuracy + completeness + clarity)
@@ -41,12 +52,12 @@ import time
 import traceback
 import uuid
 
-from anthropic import AsyncAnthropicBedrock
+from openai import AsyncOpenAI
 
 # ============================================================================
 # LOGGING
 # ============================================================================
-log = logging.getLogger("qa_v2_reward_bedrock")
+log = logging.getLogger("qa_v2_reward_openai")
 if not log.handlers:
     handler = logging.StreamHandler()
     handler.setFormatter(logging.Formatter(
@@ -62,14 +73,14 @@ THINKING_START = "<think>"
 THINKING_END = "</think>"
 
 # ============================================================================
-# LLM JUDGE CONFIG (Bedrock)
+# LLM JUDGE CONFIG (OpenAI)
 # ============================================================================
-JUDGE_MODEL = os.environ.get("QA_JUDGE_MODEL", "eu.anthropic.claude-sonnet-4-6")
+JUDGE_MODEL = os.environ.get("QA_JUDGE_MODEL", "gpt-5.4-mini")
 JUDGE_MAX_TOKENS = int(os.environ.get("QA_JUDGE_MAX_TOKENS", "16384"))
-JUDGE_CONCURRENCY = int(os.environ.get("QA_JUDGE_CONCURRENCY", "4"))
+JUDGE_CONCURRENCY = int(os.environ.get("QA_JUDGE_CONCURRENCY", "8"))
 # Fallback reward when the judge refuses (safety filter) — we can't grade the
 # sample, so assign a neutral score rather than punishing the policy with 0.
-REFUSAL_REWARD = float(os.environ.get("QA_JUDGE_REFUSAL_REWARD", "0.8"))
+REFUSAL_REWARD = float(os.environ.get("QA_JUDGE_REFUSAL_REWARD", "0.5"))
 
 # ─── Length penalty (mitigates the RL "longer == higher KP coverage" bias) ───
 # Triggered post-hoc on the judge score. Penalty is computed from the ratio
@@ -82,53 +93,69 @@ LEN_PENALTY_MAX       = float(os.environ.get("QA_LEN_PENALTY_MAX",       "0.2"))
 
 
 def _build_judge_client():
-    """Build a fresh AsyncAnthropicBedrock client from env-supplied AWS creds.
+    """Build a fresh AsyncOpenAI client.
 
     A new client must be created inside each event loop. The httpx connection
     pool / TCP transport binds to the loop it is first used on; reusing a cached
     client across the short-lived loops created by asyncio.run() (see the
     ThreadPoolExecutor bridge below) raises "TCPTransport closed ... handler is
     closed". Always use this under `async with` so the client closes with its loop.
+
+    Key resolution order:
+      1. QA_JUDGE_OPENAI_API_KEY  (judge-specific override)
+      2. OPENAI_API_KEY           (SDK convention; lets you reuse an existing key)
+    Base URL is overridable via QA_JUDGE_OPENAI_BASE_URL (Azure / proxy);
+    leave unset to use the SDK default (https://api.openai.com/v1).
     """
-    access_key = os.environ.get("QA_JUDGE_AWS_ACCESS_KEY", "")
-    secret_key = os.environ.get("QA_JUDGE_AWS_SECRET_KEY", "")
-    region     = os.environ.get("QA_JUDGE_AWS_REGION", "")
-    missing = [name for name, val in [
-        ("QA_JUDGE_AWS_ACCESS_KEY", access_key),
-        ("QA_JUDGE_AWS_SECRET_KEY", secret_key),
-        ("QA_JUDGE_AWS_REGION",     region),
-    ] if not val]
-    if missing:
+    api_key = (
+        os.environ.get("QA_JUDGE_OPENAI_API_KEY")
+        or os.environ.get("OPENAI_API_KEY")
+        or ""
+    )
+    base_url = os.environ.get("QA_JUDGE_OPENAI_BASE_URL")  # None → SDK default
+    if not api_key:
         raise RuntimeError(
-            f"Bedrock judge env vars not set: {missing}. "
-            "Required: QA_JUDGE_AWS_ACCESS_KEY, QA_JUDGE_AWS_SECRET_KEY, QA_JUDGE_AWS_REGION."
+            "OpenAI judge API key not set. Set QA_JUDGE_OPENAI_API_KEY "
+            "(or OPENAI_API_KEY) before launching."
         )
 
-    return AsyncAnthropicBedrock(
-        aws_access_key=access_key,
-        aws_secret_key=secret_key,
-        aws_region=region,
-        max_retries=4,
-    )
+    kwargs = {"api_key": api_key, "max_retries": 4}
+    if base_url:
+        kwargs["base_url"] = base_url
+    return AsyncOpenAI(**kwargs)
 
 
 def _extract_judge_text(resp) -> str:
-    """Concatenate text blocks from an Anthropic messages.create response."""
-    parts = []
-    for block in resp.content:
-        if getattr(block, "type", None) == "text":
-            parts.append(block.text)
-    return "".join(parts).strip()
+    """Concatenate text from an OpenAI chat.completions response."""
+    # OpenAI-compatible: response has .choices[0].message.content (str | None).
+    try:
+        content = resp.choices[0].message.content or ""
+    except (AttributeError, IndexError):
+        content = ""
+    return content.strip()
 
 
 def _refusal_info(resp):
-    """Return (category, explanation) for a stop_reason == 'refusal' response.
+    """Return (category, explanation) for a refused response.
 
-    Refusals are a model-level safety decision (not a client toggle); medical
-    content commonly false-positives the 'bio' category. stop_details may be None.
+    OpenAI-style APIs surface a model refusal either via the structured
+    ``message.refusal`` field (newer SDKs) or via ``finish_reason=='content_filter'``.
+    Either way we collapse into the same (category, explanation) shape that
+    the rest of this module already expects, so downstream handling and the
+    ``_dump_refusal`` record are byte-identical to qa_bedrock.
     """
-    details = getattr(resp, "stop_details", None)
-    return getattr(details, "category", None), getattr(details, "explanation", None)
+    try:
+        choice = resp.choices[0]
+    except (AttributeError, IndexError):
+        return None, None
+    finish = getattr(choice, "finish_reason", None)
+    msg = getattr(choice, "message", None)
+    explanation = getattr(msg, "refusal", None) if msg is not None else None
+    if finish == "content_filter":
+        return "content_filter", explanation
+    if explanation:
+        return "refusal", explanation
+    return None, None
 
 
 # Set QA_JUDGE_REFUSAL_DIR to a (shared) directory to persist every refusal for
@@ -833,17 +860,32 @@ async def _call_qa_judge(question, key_points, answer, raw_generation, client, m
         raw_text = ""
         stop_reason = None
         try:
-            async with client.messages.stream(
+            resp = await client.chat.completions.create(
                 model=JUDGE_MODEL,
-                system=QA_JUDGE_SYSTEM_PROMPT,
-                messages=[{"role": "user", "content": prompt}],
-                max_tokens=JUDGE_MAX_TOKENS,
-            ) as stream:
-                resp = await stream.get_final_message()
-            stop_reason = getattr(resp, "stop_reason", None)
-            if stop_reason == "refusal":
+                messages=[
+                    {"role": "system", "content": QA_JUDGE_SYSTEM_PROMPT},
+                    {"role": "user",   "content": prompt},
+                ],
+                max_completion_tokens=JUDGE_MAX_TOKENS,
+                temperature=0.0,
+            )
+            # Defensive: an OpenAI-style endpoint very occasionally returns 200
+            # with no choices (rate-limit edge cases, proxy gateways) — surface
+            # as ValueError so the retry loop picks it up.
+            if not getattr(resp, "choices", None):
+                upstream_err = getattr(resp, "error", None)
+                resp_id = getattr(resp, "id", None)
+                raise ValueError(
+                    f"OpenAI returned no choices "
+                    f"(resp.id={resp_id!r}, error={upstream_err!r})"
+                )
+            # stop_reason mirrors the bedrock variable name; for OpenAI-style
+            # APIs the equivalent field is finish_reason. Kept under the same
+            # name so retry/log lines are byte-identical to qa_bedrock.
+            stop_reason = getattr(resp.choices[0], "finish_reason", None)
+            category, explanation = _refusal_info(resp)
+            if category is not None:
                 # Deterministic for identical input — do NOT retry.
-                category, explanation = _refusal_info(resp)
                 log.warning(f"QA judge REFUSED by safety filter "
                             f"(category={category}): {explanation}")
                 _dump_refusal({
@@ -917,17 +959,32 @@ async def _call_conv_judge(ground_truth, answer, raw_generation, client, max_ret
         raw_text = ""
         stop_reason = None
         try:
-            async with client.messages.stream(
+            resp = await client.chat.completions.create(
                 model=JUDGE_MODEL,
-                system=CONV_JUDGE_SYSTEM_PROMPT,
-                messages=[{"role": "user", "content": prompt}],
-                max_tokens=JUDGE_MAX_TOKENS,
-            ) as stream:
-                resp = await stream.get_final_message()
-            stop_reason = getattr(resp, "stop_reason", None)
-            if stop_reason == "refusal":
+                messages=[
+                    {"role": "system", "content": CONV_JUDGE_SYSTEM_PROMPT},
+                    {"role": "user",   "content": prompt},
+                ],
+                max_completion_tokens=JUDGE_MAX_TOKENS,
+                temperature=0.0,
+            )
+            # Defensive: an OpenAI-style endpoint very occasionally returns 200
+            # with no choices (rate-limit edge cases, proxy gateways) — surface
+            # as ValueError so the retry loop picks it up.
+            if not getattr(resp, "choices", None):
+                upstream_err = getattr(resp, "error", None)
+                resp_id = getattr(resp, "id", None)
+                raise ValueError(
+                    f"OpenAI returned no choices "
+                    f"(resp.id={resp_id!r}, error={upstream_err!r})"
+                )
+            # stop_reason mirrors the bedrock variable name; for OpenAI-style
+            # APIs the equivalent field is finish_reason. Kept under the same
+            # name so retry/log lines are byte-identical to qa_bedrock.
+            stop_reason = getattr(resp.choices[0], "finish_reason", None)
+            category, explanation = _refusal_info(resp)
+            if category is not None:
                 # Deterministic for identical input — do NOT retry.
-                category, explanation = _refusal_info(resp)
                 log.warning(f"Conv judge REFUSED by safety filter "
                             f"(category={category}): {explanation}")
                 _dump_refusal({

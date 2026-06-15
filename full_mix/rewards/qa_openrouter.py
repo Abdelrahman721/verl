@@ -1,18 +1,43 @@
 """
-Reward scoring for medical QA + conversations using LLM-as-a-judge (Bedrock).
+Reward scoring for medical QA + conversations using LLM-as-a-judge (OpenRouter).
 
-This is the Anthropic-Bedrock variant of qa.py — same scoring, same prompts,
-same entry point (compute_score), only the judge client changes:
-AsyncOpenAI -> AsyncAnthropicBedrock.
+This is the OpenRouter variant of qa_bedrock.py — IDENTICAL scoring, IDENTICAL
+prompts, IDENTICAL entry point (compute_score), IDENTICAL reward dict shape,
+IDENTICAL retry / refusal / parse / repair / validation logic. The ONLY
+thing that changes vs. qa_bedrock.py is the library used to contact the judge:
+AsyncAnthropicBedrock -> AsyncOpenAI (pointed at OpenRouter's OpenAI-compatible
+HTTP API at https://openrouter.ai/api/v1).
 
-Required env vars (read at first judge call, then cached):
-  QA_JUDGE_AWS_ACCESS_KEY   AWS access key id
-  QA_JUDGE_AWS_SECRET_KEY   AWS secret access key
-  QA_JUDGE_AWS_REGION       AWS region (e.g. "eu-central-1")
+OpenRouter speaks the OpenAI protocol, so the rest of this module (refusal
+detection via finish_reason / message.refusal, JSON parse, repair, retry,
+score computation) is unchanged from qa_openai.py.
+
+Additionally, both judge calls use OpenAI's structured-output strict mode
+(response_format={"type": "json_schema", "strict": True, ...}) with the
+schemas QA_RESPONSE_SCHEMA / CONV_RESPONSE_SCHEMA defined below. This
+guarantees the returned content parses AND has every required field with
+the correct type, eliminating the "missing bare numeric" and "unescaped
+quote inside justification" parse failures we used to see. The
+_repair_qa_parsed / _repair_conv_parsed chain stays in place as
+belt-and-suspenders but should now rarely fire.
+
+Required env vars (read at first judge call):
+  QA_JUDGE_OPENROUTER_API_KEY   OpenRouter API key. If unset, falls back to
+                                the standard OPENROUTER_API_KEY, so you can
+                                reuse an existing key without exporting a
+                                judge-specific one.
 Optional:
-  QA_JUDGE_MODEL            Bedrock model / inference-profile id
-                            (default: "eu.anthropic.claude-sonnet-4-6")
-  QA_JUDGE_MAX_TOKENS       (default: 32768)
+  QA_JUDGE_OPENROUTER_BASE_URL  Override the OpenRouter base URL (proxy /
+                                self-host). Default: https://openrouter.ai/api/v1
+  QA_JUDGE_MODEL                OpenRouter model id, "<provider>/<model>"
+                                (default: "openai/gpt-5.4-mini")
+  QA_JUDGE_MAX_TOKENS           (default: 16384)
+  QA_JUDGE_CONCURRENCY          (default: 8)
+  QA_JUDGE_REFUSAL_REWARD       (default: 0.5)
+  QA_JUDGE_REFUSAL_DIR          dump dir for refused judge calls (default: off)
+  QA_LEN_PENALTY_THRESHOLD      (default: 2.0)
+  QA_LEN_PENALTY_K              (default: 0.1)
+  QA_LEN_PENALTY_MAX            (default: 0.25)
 
 Handles two eval_modes:
 - "qa": Single-turn medical Q&A with key points (accuracy + completeness + clarity)
@@ -41,12 +66,12 @@ import time
 import traceback
 import uuid
 
-from anthropic import AsyncAnthropicBedrock
+from openai import AsyncOpenAI
 
 # ============================================================================
 # LOGGING
 # ============================================================================
-log = logging.getLogger("qa_v2_reward_bedrock")
+log = logging.getLogger("qa_v2_reward_openrouter")
 if not log.handlers:
     handler = logging.StreamHandler()
     handler.setFormatter(logging.Formatter(
@@ -62,14 +87,14 @@ THINKING_START = "<think>"
 THINKING_END = "</think>"
 
 # ============================================================================
-# LLM JUDGE CONFIG (Bedrock)
+# LLM JUDGE CONFIG (OpenRouter)
 # ============================================================================
-JUDGE_MODEL = os.environ.get("QA_JUDGE_MODEL", "eu.anthropic.claude-sonnet-4-6")
+JUDGE_MODEL = os.environ.get("QA_JUDGE_MODEL", "openai/gpt-5.4-mini")
 JUDGE_MAX_TOKENS = int(os.environ.get("QA_JUDGE_MAX_TOKENS", "16384"))
-JUDGE_CONCURRENCY = int(os.environ.get("QA_JUDGE_CONCURRENCY", "4"))
+JUDGE_CONCURRENCY = int(os.environ.get("QA_JUDGE_CONCURRENCY", "8"))
 # Fallback reward when the judge refuses (safety filter) — we can't grade the
 # sample, so assign a neutral score rather than punishing the policy with 0.
-REFUSAL_REWARD = float(os.environ.get("QA_JUDGE_REFUSAL_REWARD", "0.8"))
+REFUSAL_REWARD = float(os.environ.get("QA_JUDGE_REFUSAL_REWARD", "0.5"))
 
 # ─── Length penalty (mitigates the RL "longer == higher KP coverage" bias) ───
 # Triggered post-hoc on the judge score. Penalty is computed from the ratio
@@ -82,53 +107,75 @@ LEN_PENALTY_MAX       = float(os.environ.get("QA_LEN_PENALTY_MAX",       "0.2"))
 
 
 def _build_judge_client():
-    """Build a fresh AsyncAnthropicBedrock client from env-supplied AWS creds.
+    """Build a fresh AsyncOpenAI client pointed at OpenRouter.
 
     A new client must be created inside each event loop. The httpx connection
     pool / TCP transport binds to the loop it is first used on; reusing a cached
     client across the short-lived loops created by asyncio.run() (see the
     ThreadPoolExecutor bridge below) raises "TCPTransport closed ... handler is
     closed". Always use this under `async with` so the client closes with its loop.
+
+    Key resolution order:
+      1. QA_JUDGE_OPENROUTER_API_KEY  (judge-specific override)
+      2. OPENROUTER_API_KEY           (lets you reuse an existing key)
+    Base URL is overridable via QA_JUDGE_OPENROUTER_BASE_URL; default is
+    OpenRouter's public endpoint (https://openrouter.ai/api/v1). Unlike
+    qa_openai.py, base_url is REQUIRED on the client object because the
+    OpenAI SDK would otherwise default to api.openai.com.
     """
-    access_key = os.environ.get("QA_JUDGE_AWS_ACCESS_KEY", "")
-    secret_key = os.environ.get("QA_JUDGE_AWS_SECRET_KEY", "")
-    region     = os.environ.get("QA_JUDGE_AWS_REGION", "")
-    missing = [name for name, val in [
-        ("QA_JUDGE_AWS_ACCESS_KEY", access_key),
-        ("QA_JUDGE_AWS_SECRET_KEY", secret_key),
-        ("QA_JUDGE_AWS_REGION",     region),
-    ] if not val]
-    if missing:
+    api_key = (
+        os.environ.get("QA_JUDGE_OPENROUTER_API_KEY")
+        or os.environ.get("OPENROUTER_API_KEY")
+        or ""
+    )
+    base_url = (
+        os.environ.get("QA_JUDGE_OPENROUTER_BASE_URL")
+        or "https://openrouter.ai/api/v1"
+    )
+    if not api_key:
         raise RuntimeError(
-            f"Bedrock judge env vars not set: {missing}. "
-            "Required: QA_JUDGE_AWS_ACCESS_KEY, QA_JUDGE_AWS_SECRET_KEY, QA_JUDGE_AWS_REGION."
+            "OpenRouter judge API key not set. Set QA_JUDGE_OPENROUTER_API_KEY "
+            "(or OPENROUTER_API_KEY) before launching."
         )
 
-    return AsyncAnthropicBedrock(
-        aws_access_key=access_key,
-        aws_secret_key=secret_key,
-        aws_region=region,
+    return AsyncOpenAI(
+        api_key=api_key,
+        base_url=base_url,
         max_retries=4,
     )
 
 
 def _extract_judge_text(resp) -> str:
-    """Concatenate text blocks from an Anthropic messages.create response."""
-    parts = []
-    for block in resp.content:
-        if getattr(block, "type", None) == "text":
-            parts.append(block.text)
-    return "".join(parts).strip()
+    """Concatenate text from an OpenAI chat.completions response."""
+    # OpenAI-compatible: response has .choices[0].message.content (str | None).
+    try:
+        content = resp.choices[0].message.content or ""
+    except (AttributeError, IndexError):
+        content = ""
+    return content.strip()
 
 
 def _refusal_info(resp):
-    """Return (category, explanation) for a stop_reason == 'refusal' response.
+    """Return (category, explanation) for a refused response.
 
-    Refusals are a model-level safety decision (not a client toggle); medical
-    content commonly false-positives the 'bio' category. stop_details may be None.
+    OpenAI-style APIs surface a model refusal either via the structured
+    ``message.refusal`` field (newer SDKs) or via ``finish_reason=='content_filter'``.
+    Either way we collapse into the same (category, explanation) shape that
+    the rest of this module already expects, so downstream handling and the
+    ``_dump_refusal`` record are byte-identical to qa_bedrock.
     """
-    details = getattr(resp, "stop_details", None)
-    return getattr(details, "category", None), getattr(details, "explanation", None)
+    try:
+        choice = resp.choices[0]
+    except (AttributeError, IndexError):
+        return None, None
+    finish = getattr(choice, "finish_reason", None)
+    msg = getattr(choice, "message", None)
+    explanation = getattr(msg, "refusal", None) if msg is not None else None
+    if finish == "content_filter":
+        return "content_filter", explanation
+    if explanation:
+        return "refusal", explanation
+    return None, None
 
 
 # Set QA_JUDGE_REFUSAL_DIR to a (shared) directory to persist every refusal for
@@ -279,36 +326,6 @@ Test: "Would a medical expert say this concept is adequately addressed?" If yes 
 ━━━ OUTPUT FORMAT ━━━
 Respond in JSON only. No markdown fences. No preamble.
 
-CRITICAL — REQUIRED KEYS: Your JSON object MUST obey the following
-schema precisely
-
-Use these EXACT key names. Do NOT rename them, add suffixes, abbreviate, or
-substitute any variant — e.g. do NOT output "accuracy_score", "clarity_score",
-"accuracy_rating", "score", or anything other than the exact keys listed above.
-
-EVERY key in the schema below is MANDATORY. Do NOT omit ANY field — including
-"accuracy_category", "accuracy", "accuracy_justification", "clarity_category",
-"clarity", "clarity_justification", "key_point_coverage", and
-"overall_justification". A response missing any required key is INVALID and
-will be rejected. Output the COMPLETE JSON object every time, even if you are
-uncertain about a value — pick your best estimate and include the field rather
-than dropping it. PARTICULARLY common mistake: emitting "accuracy_category"
-and "accuracy_justification" but forgetting the bare numeric "accuracy"
-between them. Do NOT do that. Same for "clarity".
-
-JSON ESCAPE RULES — strictly enforced because the output is parsed by a strict
-JSON parser:
-- Inside justification strings, use SINGLE quotes ('...') when quoting any
-  text from the student's answer, the reference, a study name, a drug name,
-  or anything else. NEVER use raw double quotes inside a justification — they
-  close the JSON string early and break parsing.
-- Good:  "accuracy_justification": "The student writes 'aspirin dissolves clots' which is wrong."
-- BAD :  "accuracy_justification": "The student writes "aspirin dissolves clots" which is wrong."
-- If you absolutely must use double quotes inside a string, escape every one
-  with a backslash: \\". Do not leave any unescaped.
-- Inside any string value, escape every literal newline as \\n; do not put raw
-  line breaks inside a string.
-
 {
   "accuracy_category": "NO_ERRORS|TRIVIAL_IMPRECISION|MINOR_ERROR|MODERATE_ERROR|MAJOR_ERROR|DANGEROUS",
   "accuracy": <1-10>,
@@ -333,6 +350,55 @@ STUDENT'S ANSWER:
 {answer}
 
 Evaluate the student's answer:"""
+
+# Structured-output schema for the QA judge — paired with
+# response_format={"type": "json_schema", "strict": True, ...} on the chat
+# completion. Mirrors the JSON the system prompt asks for, field-for-field.
+# strict mode requires:
+#   - additionalProperties: False on every object
+#   - every property listed under `required`
+#   - no range/format constraints (so 1-10 bounds stay enforced only by the
+#     prompt, but _safe_float + _compute_qa_reward clamp downstream anyway)
+QA_RESPONSE_SCHEMA = {
+    "type": "object",
+    "additionalProperties": False,
+    "required": [
+        "accuracy_category", "accuracy", "accuracy_justification",
+        "clarity_category",  "clarity",  "clarity_justification",
+        "key_point_coverage", "overall_justification",
+    ],
+    "properties": {
+        "accuracy_category": {
+            "type": "string",
+            "enum": ["NO_ERRORS", "TRIVIAL_IMPRECISION", "MINOR_ERROR",
+                     "MODERATE_ERROR", "MAJOR_ERROR", "DANGEROUS"],
+        },
+        "accuracy":              {"type": "integer"},
+        "accuracy_justification": {"type": "string"},
+        "clarity_category": {
+            "type": "string",
+            "enum": ["EXCEPTIONAL", "CLEAR", "BASIC",
+                     "DISORGANIZED", "INCOMPREHENSIBLE"],
+        },
+        "clarity":              {"type": "integer"},
+        "clarity_justification": {"type": "string"},
+        "key_point_coverage": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "additionalProperties": False,
+                "required": ["id", "status", "note"],
+                "properties": {
+                    "id":     {"type": "integer"},
+                    "status": {"type": "string",
+                               "enum": ["COVERED", "PARTIAL", "MISSING"]},
+                    "note":   {"type": "string"},
+                },
+            },
+        },
+        "overall_justification": {"type": "string"},
+    },
+}
 
 # ============================================================================
 # CONVERSATION JUDGE PROMPT
@@ -454,37 +520,6 @@ Step 2 — Score:
 ━━━ OUTPUT FORMAT ━━━
 Respond in JSON only. No markdown fences. No preamble.
 
-CRITICAL — REQUIRED KEYS: Your JSON object MUST obey the following
-schema precisely
-
-Use these EXACT key names. Do NOT rename them, add suffixes, abbreviate, or
-substitute any variant — e.g. do NOT output "accuracy_score", "clarity_score",
-"accuracy_rating", "score", or anything other than the exact keys listed above.
-
-EVERY key in the schema below is MANDATORY. Do NOT omit ANY field — including
-"accuracy_category", "accuracy", "accuracy_justification", "behavior_category",
-"behavior", "behavior_justification", "compliance_category", "compliance",
-"compliance_justification", and "overall_justification". A response missing any
-required key is INVALID and will be rejected. Output the COMPLETE JSON object
-every time, even if you are uncertain about a value — pick your best estimate
-and include the field rather than dropping it. PARTICULARLY common mistake:
-emitting a "<dim>_category" + "<dim>_justification" pair but forgetting the
-bare numeric "<dim>" between them. Do NOT do that for accuracy, behavior, or
-compliance.
-
-JSON ESCAPE RULES — strictly enforced because the output is parsed by a strict
-JSON parser:
-- Inside justification strings, use SINGLE quotes ('...') when quoting any
-  text from the candidate, the reference, the user message, a drug name, or
-  anything else. NEVER use raw double quotes inside a justification — they
-  close the JSON string early and break parsing.
-- Good:  "behavior_justification": "The candidate replies 'I cannot help' which is over-conservative."
-- BAD :  "behavior_justification": "The candidate replies "I cannot help" which is over-conservative."
-- If you absolutely must use double quotes inside a string, escape every one
-  with a backslash: \\". Do not leave any unescaped.
-- Inside any string value, escape every literal newline as \\n; do not put raw
-  line breaks inside a string.
-
 {
   "accuracy_category": "NO_ERRORS|TRIVIAL_IMPRECISION|MINOR_ERROR|MODERATE_ERROR|MAJOR_ERROR|DANGEROUS",
   "accuracy": <0-10>,
@@ -517,6 +552,45 @@ CANDIDATE RESPONSE:
 {candidate_response}
 
 Evaluate the candidate response:"""
+
+# Structured-output schema for the conversation judge — same strict-mode
+# rules as QA_RESPONSE_SCHEMA above. The bare numeric fields stay typed as
+# integers; the prompt's 0-10 range remains enforced by the prompt + the
+# clamp inside _compute_conv_reward.
+CONV_RESPONSE_SCHEMA = {
+    "type": "object",
+    "additionalProperties": False,
+    "required": [
+        "accuracy_category",   "accuracy",   "accuracy_justification",
+        "behavior_category",   "behavior",   "behavior_justification",
+        "compliance_category", "compliance", "compliance_justification",
+        "overall_justification",
+    ],
+    "properties": {
+        "accuracy_category": {
+            "type": "string",
+            "enum": ["NO_ERRORS", "TRIVIAL_IMPRECISION", "MINOR_ERROR",
+                     "MODERATE_ERROR", "MAJOR_ERROR", "DANGEROUS"],
+        },
+        "accuracy":              {"type": "integer"},
+        "accuracy_justification": {"type": "string"},
+        "behavior_category": {
+            "type": "string",
+            "enum": ["EXEMPLARY", "APPROPRIATE", "PARTIALLY_APPROPRIATE",
+                     "INAPPROPRIATE", "HARMFUL_BEHAVIOR"],
+        },
+        "behavior":              {"type": "integer"},
+        "behavior_justification": {"type": "string"},
+        "compliance_category": {
+            "type": "string",
+            "enum": ["FULLY_COMPLIANT", "MOSTLY_COMPLIANT",
+                     "PARTIALLY_COMPLIANT", "NON_COMPLIANT", "NOT_APPLICABLE"],
+        },
+        "compliance":              {"type": "integer"},
+        "compliance_justification": {"type": "string"},
+        "overall_justification":    {"type": "string"},
+    },
+}
 
 
 # ============================================================================
@@ -833,17 +907,46 @@ async def _call_qa_judge(question, key_points, answer, raw_generation, client, m
         raw_text = ""
         stop_reason = None
         try:
-            async with client.messages.stream(
+            resp = await client.chat.completions.create(
                 model=JUDGE_MODEL,
-                system=QA_JUDGE_SYSTEM_PROMPT,
-                messages=[{"role": "user", "content": prompt}],
-                max_tokens=JUDGE_MAX_TOKENS,
-            ) as stream:
-                resp = await stream.get_final_message()
-            stop_reason = getattr(resp, "stop_reason", None)
-            if stop_reason == "refusal":
+                messages=[
+                    {"role": "system", "content": QA_JUDGE_SYSTEM_PROMPT},
+                    {"role": "user",   "content": prompt},
+                ],
+                max_completion_tokens=JUDGE_MAX_TOKENS,
+                temperature=0.0,
+                # Strict structured output — guarantees the returned content
+                # parses AND matches QA_RESPONSE_SCHEMA. Eliminates the
+                # "missing accuracy/clarity bare numeric" and "unescaped quote
+                # inside justification" failure modes upstream. _repair_qa_parsed
+                # stays in place as belt-and-suspenders but should rarely fire.
+                response_format={
+                    "type": "json_schema",
+                    "json_schema": {
+                        "name":   "qa_verdict",
+                        "strict": True,
+                        "schema": QA_RESPONSE_SCHEMA,
+                    },
+                },
+            )
+            # OpenRouter occasionally returns 200 OK with no choices when the
+            # upstream provider rate-limits or rejects the request; the actual
+            # reason is under resp.error. Surface as ValueError so the retry
+            # loop picks it up.
+            if not getattr(resp, "choices", None):
+                upstream_err = getattr(resp, "error", None)
+                resp_id = getattr(resp, "id", None)
+                raise ValueError(
+                    f"OpenRouter returned no choices "
+                    f"(resp.id={resp_id!r}, error={upstream_err!r})"
+                )
+            # stop_reason mirrors the bedrock variable name; for OpenAI-style
+            # APIs the equivalent field is finish_reason. Kept under the same
+            # name so retry/log lines are byte-identical to qa_bedrock.
+            stop_reason = getattr(resp.choices[0], "finish_reason", None)
+            category, explanation = _refusal_info(resp)
+            if category is not None:
                 # Deterministic for identical input — do NOT retry.
-                category, explanation = _refusal_info(resp)
                 log.warning(f"QA judge REFUSED by safety filter "
                             f"(category={category}): {explanation}")
                 _dump_refusal({
@@ -917,17 +1020,43 @@ async def _call_conv_judge(ground_truth, answer, raw_generation, client, max_ret
         raw_text = ""
         stop_reason = None
         try:
-            async with client.messages.stream(
+            resp = await client.chat.completions.create(
                 model=JUDGE_MODEL,
-                system=CONV_JUDGE_SYSTEM_PROMPT,
-                messages=[{"role": "user", "content": prompt}],
-                max_tokens=JUDGE_MAX_TOKENS,
-            ) as stream:
-                resp = await stream.get_final_message()
-            stop_reason = getattr(resp, "stop_reason", None)
-            if stop_reason == "refusal":
+                messages=[
+                    {"role": "system", "content": CONV_JUDGE_SYSTEM_PROMPT},
+                    {"role": "user",   "content": prompt},
+                ],
+                max_completion_tokens=JUDGE_MAX_TOKENS,
+                temperature=0.0,
+                # Strict structured output — see _call_qa_judge for the
+                # rationale. _repair_conv_parsed stays as belt-and-suspenders.
+                response_format={
+                    "type": "json_schema",
+                    "json_schema": {
+                        "name":   "conv_verdict",
+                        "strict": True,
+                        "schema": CONV_RESPONSE_SCHEMA,
+                    },
+                },
+            )
+            # OpenRouter occasionally returns 200 OK with no choices when the
+            # upstream provider rate-limits or rejects the request; the actual
+            # reason is under resp.error. Surface as ValueError so the retry
+            # loop picks it up.
+            if not getattr(resp, "choices", None):
+                upstream_err = getattr(resp, "error", None)
+                resp_id = getattr(resp, "id", None)
+                raise ValueError(
+                    f"OpenRouter returned no choices "
+                    f"(resp.id={resp_id!r}, error={upstream_err!r})"
+                )
+            # stop_reason mirrors the bedrock variable name; for OpenAI-style
+            # APIs the equivalent field is finish_reason. Kept under the same
+            # name so retry/log lines are byte-identical to qa_bedrock.
+            stop_reason = getattr(resp.choices[0], "finish_reason", None)
+            category, explanation = _refusal_info(resp)
+            if category is not None:
                 # Deterministic for identical input — do NOT retry.
-                category, explanation = _refusal_info(resp)
                 log.warning(f"Conv judge REFUSED by safety filter "
                             f"(category={category}): {explanation}")
                 _dump_refusal({

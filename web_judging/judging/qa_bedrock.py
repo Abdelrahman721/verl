@@ -76,9 +76,9 @@ REFUSAL_REWARD = float(os.environ.get("QA_JUDGE_REFUSAL_REWARD", "0.8"))
 # R = words(candidate_answer) / words(gold_text). No penalty if R <= threshold;
 # linear ramp k * (R - threshold) above it, capped at LEN_PENALTY_MAX.
 # Only over-long is penalized (under-length is already caught by completeness).
-LEN_PENALTY_THRESHOLD = float(os.environ.get("QA_LEN_PENALTY_THRESHOLD", "7.0"))
-LEN_PENALTY_K         = float(os.environ.get("QA_LEN_PENALTY_K",         "0.05"))
-LEN_PENALTY_MAX       = float(os.environ.get("QA_LEN_PENALTY_MAX",       "0.2"))
+LEN_PENALTY_THRESHOLD = float(os.environ.get("QA_LEN_PENALTY_THRESHOLD", "2.0"))
+LEN_PENALTY_K         = float(os.environ.get("QA_LEN_PENALTY_K",         "0.1"))
+LEN_PENALTY_MAX       = float(os.environ.get("QA_LEN_PENALTY_MAX",       "0.3"))
 
 
 def _build_judge_client():
@@ -193,7 +193,7 @@ You will receive:
 
 ━━━ CRITICAL: STYLE BLINDNESS ━━━
 Do NOT penalize or reward based on:
-- Stylistic choice of format (bullets vs prose, markdown vs plain text) when both communicate the answer equally well. HOWEVER: a complex multi-part answer presented as one dense paragraph with no structural breaks IS a clarity defect, graded under Clarity & Depth below.
+- Formatting (bullets vs prose, markdown vs plain text)
 - Structural similarity to any particular reference style
 - Hedging language or confidence markers
 - Whether the answer "reads like" a particular model's output
@@ -242,8 +242,6 @@ Step 2 — Pick a score within the category's range:
 ### Clarity & Depth (two-step: classify then score 1-10)
 
 This dimension captures how well the answer communicates and how much useful depth it provides beyond the bare minimum.
-
-Presentation is part of clarity here. A multi-part answer rendered as a single dense paragraph — no paragraph breaks, no section headers or bullet lists where they would aid comprehension — reads worse than the same content with appropriate structural breaks. Do NOT grade the specific *choice* of structure (markdown headers vs labelled paragraphs vs numbered lists); DO grade the absence of any structure on an answer that warrants it as a clarity defect — typically BASIC or DISORGANIZED depending on severity.
 
 Step 1 — Classify into ONE category:
 - EXCEPTIONAL: Provides genuine clinical insight — helpful context, relevant mechanisms, practical considerations, or connections that enrich understanding. Well-structured AND well-calibrated: elaborates where elaboration genuinely adds clinical value, and stays tight where it does not. Right-sized concision is itself a positive signal — but do NOT confuse brevity-for-its-own-sake with insight, and do NOT punish appropriate elaboration. A thorough answer that earns its length is EXCEPTIONAL; brevity that omits useful detail is not.

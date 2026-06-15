@@ -1,0 +1,8 @@
+# Web app deps for web_judging. Install into the SAME environment that has vLLM
+# (which already provides torch, transformers, etc.).
+fastapi>=0.110
+uvicorn[standard]>=0.29
+openai>=1.30
+anthropic>=0.40
+pyarrow>=14
+pydantic>=2

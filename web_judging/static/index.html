@@ -1,0 +1,561 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Medical QA — generate &amp; dual-judge</title>
+<style>
+  :root { --bg:#0f1115; --panel:#1a1d24; --panel2:#232732; --fg:#e6e8ee; --muted:#9aa3b2;
+          --acc:#6ea8fe; --good:#4ade80; --bad:#f87171; --warn:#fbbf24; --border:#2c313c; }
+  * { box-sizing:border-box; }
+  body { margin:0; font:14px/1.5 -apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;
+         background:var(--bg); color:var(--fg); }
+  header { padding:10px 16px; background:var(--panel); border-bottom:1px solid var(--border);
+           display:flex; gap:16px; align-items:center; flex-wrap:wrap; }
+  header h1 { font-size:15px; margin:0; font-weight:600; }
+  #health { font-size:12px; color:var(--muted); }
+  .dot { display:inline-block; width:8px; height:8px; border-radius:50%; margin-right:4px; vertical-align:middle; }
+  .ok { background:var(--good);} .no { background:var(--bad);} .un { background:var(--muted);}
+  main { padding:16px; max-width:1400px; margin:0 auto; }
+  .row { display:flex; gap:16px; flex-wrap:wrap; }
+  .card { background:var(--panel); border:1px solid var(--border); border-radius:10px; padding:14px; }
+  .card h2 { margin:0 0 10px; font-size:13px; text-transform:uppercase; letter-spacing:.04em; color:var(--muted); }
+  label { font-size:12px; color:var(--muted); display:block; margin-bottom:4px; }
+  select, textarea, input, button { font:inherit; color:var(--fg); background:var(--panel2);
+        border:1px solid var(--border); border-radius:8px; padding:8px 10px; }
+  select, textarea, input { width:100%; }
+  textarea { resize:vertical; min-height:90px; }
+  button { cursor:pointer; background:var(--acc); color:#08101f; border:none; font-weight:600; padding:9px 16px; }
+  button.secondary { background:var(--panel2); color:var(--fg); border:1px solid var(--border); font-weight:500; }
+  button:disabled { opacity:.5; cursor:not-allowed; }
+  .controls { display:flex; gap:10px; align-items:flex-end; flex-wrap:wrap; }
+  .controls > div { flex:1; min-width:140px; }
+  details { background:var(--panel2); border:1px solid var(--border); border-radius:8px; padding:8px 12px; margin-top:8px; }
+  details summary { cursor:pointer; color:var(--muted); font-size:12px; }
+  pre { white-space:pre-wrap; word-wrap:break-word; margin:8px 0 0; font:12px/1.5 ui-monospace,Menlo,Consolas,monospace; }
+  .think { color:var(--muted); border-left:3px solid var(--border); padding-left:10px; }
+  .answer { color:var(--fg); }
+  .grid2 { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
+  @media (max-width:900px){ .grid2 { grid-template-columns:1fr; } }
+  .scorebig { font-size:30px; font-weight:700; }
+  .delta { font-size:12px; }
+  table { width:100%; border-collapse:collapse; margin-top:8px; }
+  td, th { text-align:left; padding:4px 6px; border-bottom:1px solid var(--border); vertical-align:top; }
+  th { color:var(--muted); font-weight:500; font-size:12px; }
+  .num { text-align:right; font-variant-numeric:tabular-nums; white-space:nowrap; }
+  .just { color:var(--muted); font-size:12px; }
+  .kpc-COVERED { color:var(--good);} .kpc-PARTIAL { color:var(--warn);} .kpc-MISSING { color:var(--bad);}
+  .pill { display:inline-block; padding:1px 7px; border-radius:999px; font-size:11px; border:1px solid var(--border); }
+  .err { color:var(--bad); }
+  .spin { color:var(--acc); }
+  .muted { color:var(--muted); }
+  .winner { outline:2px solid var(--acc); }
+  .section-label { margin:14px 0 2px; font-size:11px; text-transform:uppercase; letter-spacing:.06em;
+                   color:var(--acc); border-bottom:1px solid var(--border); padding-bottom:3px; }
+  .scoreline { margin:6px 0; font-size:13px; }
+  .scoreline b { font-size:15px; }
+  .banner { border-radius:8px; padding:8px 10px; margin:8px 0; font-size:12px; }
+  .banner.bad { background:rgba(248,113,113,.12); border:1px solid var(--bad); color:#fecaca; }
+  .banner.warn { background:rgba(251,191,36,.10); border:1px solid var(--warn); color:#fde68a; }
+  .badge { display:inline-block; padding:1px 8px; border-radius:6px; font-size:11px; font-weight:600; }
+  .badge.ok { background:rgba(74,222,128,.15); color:var(--good); }
+  .badge.no { background:rgba(248,113,113,.15); color:var(--bad); }
+  .nojust { color:var(--warn); font-size:12px; font-style:italic; }
+  /* rendered-markdown container */
+  .md { font-size:14px; line-height:1.55; overflow-wrap:anywhere; }
+  .md > :first-child { margin-top:0; }
+  .md > :last-child { margin-bottom:0; }
+  .md h1,.md h2,.md h3,.md h4 { line-height:1.25; margin:1em 0 .4em; text-transform:none;
+        letter-spacing:0; color:var(--fg); border:0; padding:0; }
+  .md h1 { font-size:1.35em; } .md h2 { font-size:1.2em; } .md h3 { font-size:1.08em; } .md h4 { font-size:1em; }
+  .md p { margin:.5em 0; }
+  .md ul,.md ol { margin:.5em 0; padding-left:1.5em; }
+  .md li { margin:.18em 0; }
+  .md code { background:var(--panel); border:1px solid var(--border); border-radius:4px;
+        padding:.5px 5px; font:12.5px/1.4 ui-monospace,Menlo,Consolas,monospace; }
+  .md pre { background:var(--panel); border:1px solid var(--border); border-radius:8px; padding:10px; overflow:auto; }
+  .md pre code { background:none; border:0; padding:0; }
+  .md blockquote { margin:.6em 0; padding:.2em .9em; border-left:3px solid var(--border); color:var(--muted); }
+  .md a { color:var(--acc); }
+  .md table { width:auto; border-collapse:collapse; margin:.6em 0; }
+  .md th,.md td { border:1px solid var(--border); padding:4px 8px; }
+  .md hr { border:0; border-top:1px solid var(--border); margin:1em 0; }
+  .md strong { color:var(--fg); } .md img { max-width:100%; }
+  /* tabs */
+  .tabs { display:flex; gap:6px; margin-bottom:14px; border-bottom:1px solid var(--border); }
+  .tab { background:none; border:0; color:var(--muted); font-weight:600; padding:8px 16px;
+         border-bottom:2px solid transparent; border-radius:0; cursor:pointer; }
+  .tab.active { color:var(--fg); border-bottom-color:var(--acc); }
+  /* chat */
+  #chatlog { display:flex; flex-direction:column; gap:10px; max-height:60vh; overflow-y:auto; }
+  .bubble { max-width:85%; padding:9px 13px; border-radius:12px; }
+  .bubble.user { align-self:flex-end; background:var(--acc); color:#08101f; border-bottom-right-radius:4px; }
+  .bubble.user .md, .bubble.user .md * { color:#08101f; }
+  .bubble.bot { align-self:flex-start; background:var(--panel2); border:1px solid var(--border); border-bottom-left-radius:4px; }
+  .bubble .role { font-size:10px; text-transform:uppercase; letter-spacing:.05em; opacity:.7; margin-bottom:3px; }
+  .bubble.pending { opacity:.7; font-style:italic; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Medical QA · generate &amp; dual-judge</h1>
+  <span id="health"><span class="dot un"></span>checking…</span>
+  <span style="margin-left:auto; font-size:12px; color:var(--muted);">
+    🔑 <span id="tokstate">no token</span>
+    <button class="secondary" style="padding:3px 9px; font-size:12px;" onclick="promptToken()">set token</button>
+  </span>
+</header>
+
+<main>
+  <div class="tabs">
+    <button id="tab-eval" class="tab active" onclick="showView('eval')">Evaluate</button>
+    <button id="tab-chat" class="tab" onclick="showView('chat')">Chat</button>
+  </div>
+
+  <div id="view-eval">
+  <div class="card" style="margin-bottom:16px;">
+    <h2>1 · pick an entry</h2>
+    <div class="controls">
+      <div style="max-width:200px;">
+        <label>source</label>
+        <select id="split">
+          <option value="val">val (dataset)</option>
+          <option value="train">train (dataset)</option>
+          <option value="custom">✏️ custom question</option>
+        </select>
+      </div>
+      <div>
+        <label>entry</label>
+        <select id="entry"><option>loading…</option></select>
+      </div>
+      <div style="flex:0;">
+        <span id="mode" class="pill muted">—</span>
+      </div>
+    </div>
+    <details id="refbox" style="display:none;">
+      <summary>key points &amp; gold reference</summary>
+      <div id="refcontent"></div>
+    </details>
+    <div id="custompanel" style="display:none; margin-top:10px;">
+      <div class="banner warn">Custom question — type it in the box below. The fields here are
+        <b>optional</b> grading aids: without key points, completeness defaults to full;
+        without a gold reference, the length penalty and the penalty judge are skipped.</div>
+      <label style="margin-top:8px;">gold reference answer (optional — length-penalty &amp; penalty-judge anchor)</label>
+      <textarea id="customgold" placeholder="paste a reference answer, or leave blank"></textarea>
+      <label style="margin-top:8px;">key points (optional — one per line; each becomes a CORE checklist item)</label>
+      <textarea id="customkps" placeholder="one key point per line…"></textarea>
+    </div>
+  </div>
+
+  <div class="card" style="margin-bottom:16px;">
+    <h2>2 · question → model</h2>
+    <label>question (editable — sent to the policy as the user turn)</label>
+    <textarea id="question" placeholder="select an entry above…"></textarea>
+    <div style="margin-top:10px; display:flex; gap:10px; align-items:center;">
+      <button id="genbtn" disabled>Send to model</button>
+      <span id="genstatus" class="muted"></span>
+    </div>
+    <div id="genout" style="display:none; margin-top:12px;">
+      <details open><summary>&lt;think&gt; reasoning</summary><pre id="thinkpre" class="think"></pre></details>
+      <label style="margin-top:10px;">answer</label>
+      <div id="answerpre" class="answer md"></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>3 · grade — Sonnet vs gpt-5.4-mini (shared Deepseek penalty)</h2>
+    <div style="display:flex; gap:10px; align-items:center;">
+      <button id="judgebtn" disabled>Grade the answer</button>
+      <span id="judgestatus" class="muted"></span>
+    </div>
+    <div id="judgeout" style="display:none; margin-top:14px;">
+      <div class="card" id="penaltycard" style="background:var(--panel2); margin-bottom:14px;">
+        <h2>shared penalty judge · <span id="penaltymodel" class="muted"></span></h2>
+        <div id="penaltybody"></div>
+      </div>
+      <div class="grid2">
+        <div class="card" id="sysa" style="background:var(--panel2);"></div>
+        <div class="card" id="sysb" style="background:var(--panel2);"></div>
+      </div>
+    </div>
+  </div>
+  </div><!-- /view-eval -->
+
+  <div id="view-chat" style="display:none;">
+    <div class="card">
+      <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+        <h2 style="margin:0;">chat with the model</h2>
+        <span class="muted" style="font-size:12px;">free-form, multi-turn · no judging</span>
+        <button id="chatclear" class="secondary" style="margin-left:auto; padding:4px 12px;">New chat</button>
+      </div>
+      <details style="margin-top:10px;">
+        <summary class="muted">system prompt (optional — blank uses the model default)</summary>
+        <textarea id="chatsys" style="margin-top:6px;" placeholder="e.g. You are a helpful medical assistant."></textarea>
+      </details>
+      <div id="chatlog" style="margin-top:12px;"></div>
+      <div style="margin-top:12px;">
+        <textarea id="chatinput" placeholder="type a message…  (Enter to send · Shift+Enter for newline)"></textarea>
+        <div style="margin-top:8px; display:flex; gap:10px; align-items:center;">
+          <button id="chatsend">Send</button>
+          <span id="chatstatus" class="muted"></span>
+        </div>
+      </div>
+    </div>
+  </div><!-- /view-chat -->
+</main>
+
+<!-- Markdown rendering. Loaded from CDN; if offline, mdRender() falls back to
+     escaped plain text, so the app still works without these. -->
+<script src="https://cdn.jsdelivr.net/npm/marked@12/marked.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/dompurify@3/dist/purify.min.js"></script>
+<script>
+const $ = s => document.querySelector(s);
+let current = null;       // loaded dataset entry (null in custom mode)
+let generation = null;    // full raw generation string
+let mode = 'dataset';     // 'dataset' | 'custom'
+let lenCfg = {threshold:1.3, k:0.1, max:0.3};  // length-penalty config (server reports actual)
+let judgedKps = [];       // key points used for the current grade (id -> point text)
+
+// ---- access token ----------------------------------------------------------
+// Picked up from ?token=... on first load (then scrubbed from the address bar),
+// stored in localStorage, and sent as X-Access-Token on every API call. If the
+// server has no token configured, this is simply ignored.
+const tok = () => localStorage.getItem('wj_token') || '';
+function setToken(t){ if(t==null) return; localStorage.setItem('wj_token', t.trim()); updateTokenUi(); }
+function promptToken(){ const t = window.prompt('Enter access token for this server:', tok()); if(t!=null) setToken(t); }
+function updateTokenUi(){ const el = $('#tokstate'); if(el) el.textContent = tok() ? 'token set' : 'no token'; }
+(function bootstrapToken(){
+  const u = new URL(window.location.href);
+  const t = u.searchParams.get('token');
+  if(t){ localStorage.setItem('wj_token', t.trim());
+    u.searchParams.delete('token'); history.replaceState({}, '', u.toString()); }  // don't leave it in the URL
+})();
+
+function authHeaders(extra){ const h = Object.assign({}, extra||{}); const t = tok(); if(t) h['X-Access-Token']=t; return h; }
+async function _handle(r){
+  if(r.status===401){ promptToken(); throw new Error('access token required — re-enter and retry'); }
+  if(!r.ok){ let d; try{ d=(await r.json()).detail; }catch(e){} throw new Error(d||r.statusText); }
+  return r.json();
+}
+async function jget(u){ return _handle(await fetch(u, {headers: authHeaders()})); }
+async function jpost(u,b){ return _handle(await fetch(u, {method:'POST',
+  headers: authHeaders({'Content-Type':'application/json'}), body: JSON.stringify(b)})); }
+const esc = s => (s==null?'':String(s)).replace(/[&<>]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+const fmt = (x,d=3) => (x==null||isNaN(x))?'–':Number(x).toFixed(d);
+// signed penalty formatter: 0 -> "0.00", negative -> "−0.10", positive -> "+x"
+const signed = (x) => { const n=Number(x); if(x==null||isNaN(n)) return '–';
+  return n===0 ? '0.00' : (n<0?'−':'+')+Math.abs(n).toFixed(2); };
+
+// Render markdown -> sanitized HTML. Falls back to escaped, newline-preserving
+// text when the CDN libs didn't load (offline).
+function mdRender(text){
+  const t = (text==null?'':String(text));
+  if(window.marked && window.DOMPurify){
+    try{ return window.DOMPurify.sanitize(window.marked.parse(t, {gfm:true, breaks:true})); }
+    catch(e){ /* fall through */ }
+  }
+  return `<pre style="white-space:pre-wrap;margin:0;font:inherit;">${esc(t)}</pre>`;
+}
+
+async function health(){
+  try{
+    const h = await jget('/api/health');
+    const cls = h.policy_reachable ? 'ok':'no';
+    const judges = h.blind
+      ? `judges: <b>hidden</b> (blind eval)`
+      : `A=${esc(h.system_a_model)} · B=${esc(h.system_b_model)} · penalty=${esc(h.penalty_model||'unset')}`;
+    $('#health').innerHTML =
+      `<span class="dot ${cls}"></span>policy ${h.policy_reachable?'up':'down'} · ${judges}${h.penalty_enabled?'':' (penalty disabled)'}`;
+  }catch(e){ $('#health').innerHTML = `<span class="dot no"></span>${esc(e.message)}`; }
+}
+
+async function loadSplit(split){
+  $('#entry').innerHTML = '<option>loading…</option>';
+  try{
+    const d = await jget('/api/datasets/'+split);
+    $('#entry').innerHTML = d.entries.map(e =>
+      `<option value="${e.index}">#${e.index} [${e.eval_mode}] ${esc(e.preview)}</option>`).join('');
+    if(d.entries.length) loadEntry(split, d.entries[0].index);
+  }catch(e){ $('#entry').innerHTML = `<option>error: ${esc(e.message)}</option>`; }
+}
+
+async function loadEntry(split, index){
+  mode = 'dataset';
+  $('#custompanel').style.display='none';
+  $('#entry').disabled = false;
+  current = await jget(`/api/entry/${split}/${index}`);
+  generation = null;
+  $('#question').value = current.eval_mode==='conversation' ? current.user_prompt : current.question;
+  $('#mode').textContent = current.eval_mode;
+  $('#genbtn').disabled = false;
+  $('#judgebtn').disabled = true;
+  $('#genout').style.display='none';
+  $('#judgeout').style.display='none';
+  $('#genstatus').textContent=''; $('#judgestatus').textContent='';
+  // reference panel
+  const kps = (current.key_points||[]).map(k=>`<tr><td class="num">${esc(k.id)}</td><td><span class="pill">${esc(k.importance||'CORE')}</span></td><td>${esc(k.point||k.text||'')}</td></tr>`).join('');
+  $('#refcontent').innerHTML =
+    (kps?`<table><tr><th>id</th><th>imp</th><th>key point</th></tr>${kps}</table>`:'<p class="muted">no key points</p>')+
+    `<label style="margin-top:10px;">gold reference</label><div class="md">${current.reference?mdRender(current.reference):'<span class="muted">(none)</span>'}</div>`;
+  $('#refbox').style.display='';
+}
+
+function enterCustom(){
+  mode = 'custom';
+  current = null;
+  generation = null;
+  $('#entry').innerHTML = '<option>— custom —</option>';
+  $('#entry').disabled = true;
+  $('#refbox').style.display='none';
+  $('#custompanel').style.display='';
+  $('#mode').textContent = 'custom · qa';
+  $('#question').value = '';
+  $('#question').placeholder = 'type your own question for the model…';
+  $('#genout').style.display='none';
+  $('#judgeout').style.display='none';
+  $('#genstatus').textContent=''; $('#judgestatus').textContent='';
+  $('#genbtn').disabled = false;
+  $('#judgebtn').disabled = true;
+  $('#question').focus();
+}
+
+// Parse the custom key-points textarea: one per line -> CORE checklist items.
+function parseKps(){
+  return ($('#customkps').value||'').split('\n').map(s=>s.trim()).filter(Boolean);
+}
+
+function buildMessages(){
+  const q = $('#question').value;
+  if(current && current.eval_mode==='conversation' && Array.isArray(current.messages) && current.messages.length){
+    const msgs = current.messages.map(m=>({role:m.role, content:m.content}));
+    if(msgs.length && msgs[msgs.length-1].role==='user') msgs[msgs.length-1].content = q;
+    else msgs.push({role:'user', content:q});
+    return msgs;
+  }
+  return [{role:'user', content:q}];
+}
+
+function splitThink(text){
+  const m = text.match(/<think>([\s\S]*?)<\/think>([\s\S]*)/);
+  if(m) return {think:m[1].trim(), answer:m[2].trim()};
+  return {think:null, answer:text};
+}
+
+$('#genbtn').onclick = async () => {
+  $('#genbtn').disabled=true; $('#judgebtn').disabled=true;
+  $('#genstatus').innerHTML='<span class="spin">generating… (this can take a while)</span>';
+  try{
+    const r = await jpost('/api/generate', {messages: buildMessages()});
+    generation = r.text;
+    const {think, answer} = splitThink(generation);
+    $('#thinkpre').textContent = think || '(no <think> block)';
+    $('#answerpre').innerHTML = answer ? mdRender(answer) : '<span class="muted">(empty)</span>';
+    $('#genout').style.display='';
+    $('#genstatus').innerHTML = `done · finish=${esc(r.finish_reason)} · model=${esc(r.model)}`;
+    $('#judgebtn').disabled=false;
+  }catch(e){ $('#genstatus').innerHTML=`<span class="err">${esc(e.message)}</span>`; }
+  finally{ $('#genbtn').disabled=false; }
+};
+
+function justCell(just, derivedNote){
+  if(derivedNote) return `<div class="just">${esc(derivedNote)}</div>`;
+  const t = (just==null?'':String(just)).trim();
+  return t ? `<div class="just">${esc(t)}</div>`
+           : `<div class="nojust">— no justification returned by this judge —</div>`;
+}
+function dimRow(label, val, scale, cat, just, derivedNote){
+  return `<tr><td>${esc(label)}</td><td class="num">${fmt(val,1)}<span class="muted">/${scale}</span></td>
+          <td>${cat?`<span class="pill">${esc(cat)}</span>`:''}${justCell(just, derivedNote)}</td></tr>`;
+}
+
+function renderSystem(el, sys, eval_mode){
+  const v = sys.verdict||{}; const b = sys.breakdown||{}; const f = sys.final||{};
+  // A judge that errored returns dummy 1/1 scores + an `error` field and NO
+  // justifications. Surface that loudly instead of pretending it's a real grade.
+  const judgeError = (v && v.error) || b.error;
+
+  let dims;
+  if(eval_mode==='conversation'){
+    dims = dimRow('accuracy', v.accuracy, 10, v.accuracy_category, v.accuracy_justification)
+         + dimRow('behavior', v.behavior, 10, v.behavior_category, v.behavior_justification)
+         + dimRow('compliance', v.compliance, 10, v.compliance_category, v.compliance_justification);
+  } else {
+    dims = dimRow('accuracy', v.accuracy, 10, v.accuracy_category, v.accuracy_justification)
+         + dimRow('completeness', b['reward/completeness'], 5, null, null, '(derived from key-point coverage below)')
+         + dimRow('clarity', v.clarity, 10, v.clarity_category, v.clarity_justification);
+  }
+  const kpById = {};
+  (judgedKps||[]).forEach(k=>{ kpById[k.id] = k.point || k.text || ''; });
+  const kpc = (v.key_point_coverage||[]).map(k=>
+    `<tr><td class="num">${esc(k.id)}</td>
+         <td>${esc(kpById[k.id]||'')}</td>
+         <td class="kpc-${esc(k.status)}">${esc(k.status)}</td>
+         <td class="just">${esc(k.note||'')}</td></tr>`).join('');
+
+  const jsNote = eval_mode==='conversation'
+    ? 'acc·0.40 + behavior·0.35 + compliance·0.25'
+    : 'acc·0.40 + completeness·0.50 + clarity·0.10';
+  const pt   = f['reward/penalty_total'];
+  const pok  = f['reward/penalty_judge_ok'];
+  const banner = judgeError
+    ? `<div class="banner bad"><b>QA judge call failed</b> — scores below are placeholder defaults, not a real grade.<br>${esc(judgeError)}</div>`
+    : '';
+
+  // When blinding, `sys.model` is absent and we show only the neutral label.
+  const title = esc(sys.label || sys.model || 'System')
+    + (sys.model && sys.model !== sys.label ? ` <span class="muted" style="font-size:12px;font-weight:400;">· ${esc(sys.model)}</span>` : '');
+  el.innerHTML = `
+    <h2>${title}</h2>
+    ${banner}
+
+    <div class="section-label">1 · QA judge scores ${judgeError?'<span class="badge no">unavailable</span>':''}</div>
+    <table><tr><th>dimension</th><th class="num">score</th><th>category / justification</th></tr>${dims}</table>
+    ${kpc?`<details style="margin-top:8px;"><summary>key-point coverage (${(v.key_point_coverage||[]).length})</summary>
+      <table><tr><th>id</th><th>key point</th><th>status</th><th>note</th></tr>${kpc}</table></details>`:''}
+    <details style="margin-top:6px;" ${judgeError?'':'open'}><summary>overall justification</summary>
+      ${v.overall_justification?`<div class="md">${mdRender(v.overall_justification)}</div>`:'<div class="nojust">— none returned —</div>'}</details>
+
+    <div class="section-label">1b · QA score breakdown</div>
+    <table>
+      <tr><td>weighted dimensions (judge_score)<div class="just">${jsNote}</div></td>
+          <td class="num">${fmt(b['reward/judge_score'])}</td></tr>
+      <tr><td>format penalty <span class="muted">(&lt;think&gt;…&lt;/think&gt; structure)</span></td>
+          <td class="num">${signed(b['reward/format_penalty'])}</td></tr>
+      <tr><td>length penalty <span class="muted">(over-length vs gold; ramps when ratio &gt; ${fmt(lenCfg.threshold,2)}, cap ${signed(-lenCfg.max)})</span>
+            <div class="just">ratio ${fmt(b['reward/length_ratio'],2)}× &nbsp;·&nbsp; answer ${esc(b['reward/answer_length'])} words / gold length</div></td>
+          <td class="num">${signed(b['reward/length_penalty'])}</td></tr>
+      <tr><td><b>= QA score</b> <span class="muted">max(0, judge_score + format + length)</span></td>
+          <td class="num"><b>${fmt(b.score)}</b></td></tr>
+    </table>
+
+    <div class="section-label">2 · penalty applied (shared judge)</div>
+    <div class="scoreline">− penalty total: <b>${fmt(pt)}</b>
+      <span class="muted">(self_id ${fmt(f['reward/penalty_self_id'],2)} · disclaimer ${fmt(f['reward/penalty_disclaimer_intrusion'],2)} · over_cons ${fmt(f['reward/penalty_over_conservative'],2)})</span>
+      <span class="badge ${pok?'ok':'no'}">${pok?'penalty applied':'penalty failed-open (0)'}</span></div>
+
+    <div class="section-label">3 · combined final</div>
+    <div class="scorebig">${fmt(f.score)}</div>
+    <div class="delta muted">${fmt(b.score)} (qa) − ${fmt(pt)} (penalty) = ${fmt(f.score)} (final, floored at 0)</div>
+
+    <details style="margin-top:10px;"><summary>raw judge verdict (JSON)</summary><pre>${esc(JSON.stringify(v,null,2))}</pre></details>`;
+}
+
+$('#judgebtn').onclick = async () => {
+  if(generation==null) return;
+  $('#judgebtn').disabled=true;
+  $('#judgestatus').innerHTML='<span class="spin">grading with 3 judges…</span>';
+  try{
+    const payload = (mode==='custom')
+      ? {candidate: generation, question: $('#question').value, eval_mode: 'qa',
+         key_points: parseKps(), reference: $('#customgold').value || ''}
+      : {split: current.split, index: current.index, candidate: generation};
+    const r = await jpost('/api/judge', payload);
+    if(r.length_penalty) lenCfg = r.length_penalty;
+    judgedKps = r.key_points || [];
+    // penalty (shared — applied identically to BOTH systems)
+    const p = r.penalty||{};
+    const pok = !!p.judge_ok;
+    $('#penaltymodel').innerHTML =
+      `<span class="badge ${pok?'ok':'no'}">${pok?'judge OK':'failed-open'}</span> · total ${fmt(p.penalty_total,2)}`;
+    const failNote = pok ? '' :
+      `<div class="banner warn">Penalty judge failed open — total forced to 0, so it does not affect either final score. Check FULL_MIX_JUDGE_* config.</div>`;
+    $('#penaltybody').innerHTML = `
+      <div class="muted" style="margin-bottom:6px;">Same Deepseek penalty result is subtracted from both systems.</div>
+      ${failNote}
+      <table><tr><th>dimension</th><th class="num">severity</th><th class="num">penalty</th></tr>
+        <tr><td>needless_self_id</td><td class="num">${esc(p.needless_self_id)}/3</td><td class="num">${fmt(p.penalty_self_id,2)}</td></tr>
+        <tr><td>disclaimer_intrusion</td><td class="num">${esc(p.disclaimer_intrusion)}/3</td><td class="num">${fmt(p.penalty_disclaimer_intrusion,2)}</td></tr>
+        <tr><td>over_conservative</td><td class="num">${esc(p.over_conservative)}/3</td><td class="num">${fmt(p.penalty_over_conservative,2)}</td></tr>
+        <tr><td><b>total</b></td><td></td><td class="num"><b>${fmt(p.penalty_total,2)}</b></td></tr>
+      </table>
+      <div class="section-label">penalty judge feedback (brief_reason)</div>
+      <div class="md">${p.brief_reason?mdRender(p.brief_reason):'<span class="muted">(no reason returned)</span>'}</div>`;
+    // systems
+    renderSystem($('#sysa'), r.system_a, r.eval_mode);
+    renderSystem($('#sysb'), r.system_b, r.eval_mode);
+    // highlight higher final score
+    const fa = r.system_a.final?.score ?? -1, fb = r.system_b.final?.score ?? -1;
+    $('#sysa').classList.toggle('winner', fa>=fb);
+    $('#sysb').classList.toggle('winner', fb>fa);
+    $('#judgeout').style.display='';
+    $('#judgestatus').innerHTML = `done · Δfinal (A−B) = ${fmt(fa-fb)}`;
+  }catch(e){ $('#judgestatus').innerHTML=`<span class="err">${esc(e.message)}</span>`; }
+  finally{ $('#judgebtn').disabled=false; }
+};
+
+// ---- chat view (free-form, multi-turn, no judging) -------------------------
+let chat = [];  // [{role:'user'|'bot', text, think, answer, pending}]
+function showView(which){
+  const ev = which==='eval';
+  $('#view-eval').style.display = ev ? '' : 'none';
+  $('#view-chat').style.display = ev ? 'none' : '';
+  $('#tab-eval').classList.toggle('active', ev);
+  $('#tab-chat').classList.toggle('active', !ev);
+  if(!ev) $('#chatinput').focus();
+}
+function renderChat(){
+  const log = $('#chatlog');
+  log.innerHTML = chat.map(t => {
+    if(t.role==='user')
+      return `<div class="bubble user"><div class="role">you</div><div class="md">${mdRender(t.text)}</div></div>`;
+    if(t.pending)
+      return `<div class="bubble bot pending"><div class="role">model</div>${esc(t.text)}</div>`;
+    const think = t.think ? `<details style="margin-top:6px;"><summary class="muted" style="font-size:11px;">&lt;think&gt; reasoning</summary><pre class="think">${esc(t.think)}</pre></details>` : '';
+    return `<div class="bubble bot"><div class="role">model</div><div class="md">${mdRender(t.answer || t.text)}</div>${think}</div>`;
+  }).join('');
+  log.scrollTop = log.scrollHeight;
+}
+// Build the message list for the model: optional system prompt + the turns so
+// far. Assistant history uses the answer (post-</think>), not the raw think.
+function chatApiMessages(){
+  const msgs = [];
+  const sys = ($('#chatsys').value||'').trim();
+  if(sys) msgs.push({role:'system', content:sys});
+  for(const t of chat){
+    if(t.pending) continue;
+    msgs.push(t.role==='user' ? {role:'user', content:t.text}
+                              : {role:'assistant', content:(t.answer ?? t.text)});
+  }
+  return msgs;
+}
+async function chatSend(){
+  const inp = $('#chatinput'); const text = inp.value.trim();
+  if(!text) return;
+  inp.value='';
+  chat.push({role:'user', text});
+  const pending = {role:'bot', pending:true, text:'thinking…'};
+  chat.push(pending);
+  renderChat();
+  $('#chatsend').disabled=true; $('#chatstatus').innerHTML='<span class="spin">generating…</span>';
+  try{
+    const r = await jpost('/api/generate', {messages: chatApiMessages()});
+    const {think, answer} = splitThink(r.text);
+    Object.assign(pending, {pending:false, text:r.text, think, answer});
+    $('#chatstatus').textContent = `done · finish=${r.finish_reason||''}`;
+  }catch(e){
+    // Roll back this failed exchange so it never pollutes later context, and
+    // restore the input so the user can retry. The last two entries are
+    // [user, pending] (single-threaded), so two pops undo exactly this turn.
+    chat.pop();              // remove pending bot placeholder
+    chat.pop();              // remove the user turn that failed
+    inp.value = text;
+    $('#chatstatus').innerHTML = `<span class="err">${esc(e.message)} — message restored, try again</span>`;
+  }finally{
+    $('#chatsend').disabled=false; renderChat(); inp.focus();
+  }
+}
+$('#chatsend').onclick = chatSend;
+$('#chatclear').onclick = () => { chat=[]; renderChat(); $('#chatstatus').textContent=''; $('#chatinput').focus(); };
+$('#chatinput').addEventListener('keydown', e => {
+  if(e.key==='Enter' && !e.shiftKey){ e.preventDefault(); chatSend(); }
+});
+
+$('#split').onchange = e => { const v=e.target.value; if(v==='custom') enterCustom(); else loadSplit(v); };
+$('#entry').onchange = e => loadEntry($('#split').value, parseInt(e.target.value,10));
+
+updateTokenUi();
+health();
+loadSplit('val');
+</script>
+</body>
+</html>
