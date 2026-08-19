@@ -1,0 +1,76 @@
+{
+  "params": {
+    "chat_budget": 2000,
+    "ifeval_budget": 2000,
+    "safety_budget": 2000,
+    "medical_budget": 10000,
+    "seed": 9051,
+    "seed_offsets": {
+      "chat": 0,
+      "ifeval": 1,
+      "safety": 2,
+      "medical": 3
+    }
+  },
+  "medical_seen_breakdown": {
+    "stage1_seen": 32538,
+    "stage2_seen": 13849,
+    "union_seen": 40508,
+    "unseen_pool": 275779
+  },
+  "pool_sizes": {
+    "general_chat": 2000,
+    "general_ifeval": 2000,
+    "general_safety": 2000,
+    "medical_unseen": 10000,
+    "bench_unseen": 6583
+  },
+  "final_rows": 22583,
+  "data_source_counts": {
+    "local/dolci-chat-32b": 2000,
+    "local/dolci-ifeval-32b": 2000,
+    "local/safety-dpo-reference": 2000,
+    "medical_qa": 9644,
+    "medical_conv": 356,
+    "medical_benchmark_mcq": 3084,
+    "medical_benchmark_numeric": 704,
+    "medical_benchmark_text": 2624,
+    "medical_benchmark_medec": 171
+  },
+  "task_type_counts": {
+    "None": 16000,
+    "mcq": 2381,
+    "classification": 703,
+    "generation": 3499
+  },
+  "unified_extra_info": [
+    "baseline_model",
+    "baseline_response",
+    "custom_id",
+    "index",
+    "split",
+    "user_prompt",
+    "constraint",
+    "constraint_type",
+    "key",
+    "tag",
+    "eval_mode",
+    "question",
+    "question_id",
+    "source",
+    "source_article",
+    "difficulty",
+    "type_id",
+    "specialty",
+    "topic_group",
+    "audience",
+    "parent_id",
+    "parent_conv_id",
+    "sub_conv_id",
+    "sub_index",
+    "total_subs",
+    "task_type",
+    "helm_scenario"
+  ],
+  "output_path": "/data/abdelrahman/verl/data/medical_qa_stage9/retention.parquet"
+}

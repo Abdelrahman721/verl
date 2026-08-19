@@ -1,0 +1,45 @@
+{#- Dual-mode (thinking / instant) ChatML template for the Qwen3-4B SFT lineage.
+
+    Extends chat_template_qwen3_minimal.jinja with an explicit reasoning slot.
+    The assistant payload is ALWAYS framed the same way:
+
+        <think>\n{reasoning}\n</think>\n\n{content}
+
+    Instant-mode turns are the same string with an empty reasoning body:
+
+        <think>\n\n</think>\n\n{content}
+
+    so the two modes are byte-identical up to what sits between the tags. A
+    turn is instant-mode iff it has no non-empty `reasoning_content` field.
+
+    Inference:
+      add_generation_prompt=True, enable_thinking=True  (default)
+        -> prompt ends '<|im_start|>assistant\n', model opens its own <think>.
+      add_generation_prompt=True, enable_thinking=False
+        -> prompt ends '<|im_start|>assistant\n<think>\n\n</think>\n\n',
+           model continues straight into the answer.
+
+    The whole payload (think block included) sits inside {% generation %} so
+    `assistant_only_loss=True` trains on it. In instant mode that teaches the
+    model to emit the empty block itself, which keeps free-running generation
+    consistent with the forced-prefix path above.
+#}
+{%- if messages[0]['role'] == 'system' %}
+    {{- '<|im_start|>system\n' + messages[0]['content'] + '<|im_end|>\n' }}
+{%- else %}
+    {{- '<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n' }}
+{%- endif %}
+{%- for message in messages %}
+    {%- if message.role == "user" or (message.role == "system" and not loop.first) %}
+        {{- '<|im_start|>' + message.role + '\n' + message.content + '<|im_end|>' + '\n' }}
+    {%- elif message.role == "assistant" %}
+        {%- set reasoning = message.reasoning_content | default('', true) | trim %}
+        {{- '<|im_start|>' + message.role + '\n' }}{% generation %}{{- '<think>\n' + reasoning + '\n</think>\n\n' + message.content + '<|im_end|>' + '\n' }}{% endgeneration %}
+    {%- endif %}
+{%- endfor %}
+{%- if add_generation_prompt %}
+    {{- '<|im_start|>assistant\n' }}
+    {%- if enable_thinking is defined and not enable_thinking %}
+        {{- '<think>\n\n</think>\n\n' }}
+    {%- endif %}
+{%- endif %}

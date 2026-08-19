@@ -1,0 +1,47 @@
+{
+  "cache": "/data/abdelrahman/verl/data/medical_qa_stage3/_stats_cache.json",
+  "threshold": 0.6,
+  "seed": 1234,
+  "pool_targets_requested": {
+    "stage1_mastered_n": 1000,
+    "stage2_unmastered_n": 2000,
+    "stage2_mastered_n": 1000,
+    "bench_mcq_n": 8507,
+    "bench_numeric_n": 1995,
+    "bench_medec_n": 435,
+    "bench_text_n": 6256
+  },
+  "pools_produced": {
+    "A1m_stage1_mastered": {
+      "rows": 1000,
+      "pool_total": 26639
+    },
+    "A2u_stage2_unmastered": {
+      "rows": 2000,
+      "pool_total": 3882
+    },
+    "A2m_stage2_mastered": {
+      "rows": 1000,
+      "pool_total": 9967
+    },
+    "E_bench": {
+      "rows": 17193,
+      "per_eval_mode": {
+        "mcq": 8507,
+        "numeric": 1995,
+        "medec_hybrid": 435,
+        "text_judge_conv": 6256
+      }
+    }
+  },
+  "output_train_parquet": "/data/abdelrahman/verl/data/medical_qa_stage3/train.parquet",
+  "total_rows": 21193,
+  "total_data_source_counts": {
+    "medical_qa": 3045,
+    "medical_conv": 955,
+    "medical_benchmark_mcq": 8507,
+    "medical_benchmark_numeric": 1995,
+    "medical_benchmark_text": 6256,
+    "medical_benchmark_medec": 435
+  }
+}

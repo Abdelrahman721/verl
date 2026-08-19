@@ -1,0 +1,59 @@
+{
+  "k": 3,
+  "seed": 42,
+  "budget_range": [
+    200,
+    6000
+  ],
+  "mode_split_target": {
+    "budget": 0.6,
+    "free": 0.2,
+    "nothink": 0.2
+  },
+  "by_source": {
+    "local/dolci-chat-32b": {
+      "filename": "chat_with_baseline_train.parquet",
+      "source": "/data/abdelrahman/verl/data/chat_ifeval_mix2/chat_with_baseline_train.parquet",
+      "source_rows": 2000,
+      "output": "/data/abdelrahman/verl/data/lcpo_mix/chat_with_baseline_train.parquet",
+      "output_rows": 6000,
+      "budget_rows": 3592,
+      "budget_min_seen": 200,
+      "budget_max_seen": 5999,
+      "budget_mean": 3097.2
+    },
+    "local/dolci-ifeval-32b": {
+      "filename": "ifeval_train.parquet",
+      "source": "/data/abdelrahman/verl/data/chat_ifeval_mix2/ifeval_train.parquet",
+      "source_rows": 4000,
+      "output": "/data/abdelrahman/verl/data/lcpo_mix/ifeval_train.parquet",
+      "output_rows": 12000,
+      "budget_rows": 7193,
+      "budget_min_seen": 201,
+      "budget_max_seen": 6000,
+      "budget_mean": 3110.5
+    },
+    "local/dolci-math-7b": {
+      "filename": "math_train.parquet",
+      "source": "/data/abdelrahman/verl/data/chat_ifeval_math_mix/math_train.parquet",
+      "source_rows": 2000,
+      "output": "/data/abdelrahman/verl/data/lcpo_mix/math_train.parquet",
+      "output_rows": 6000,
+      "budget_rows": 3601,
+      "budget_min_seen": 201,
+      "budget_max_seen": 6000,
+      "budget_mean": 3097.2
+    }
+  },
+  "total_rows": 24000,
+  "mode_counts": {
+    "budget": 14386,
+    "free": 4813,
+    "nothink": 4801
+  },
+  "mode_fractions": {
+    "budget": 0.5994,
+    "free": 0.2005,
+    "nothink": 0.2
+  }
+}

@@ -3,12 +3,12 @@ set -euo pipefail
 
 # ===== Config (override via env or scripts/dev.env) =====
 IMAGE="${IMAGE:-verlai/verl:vllm017.latest}"
-NAME="${NAME:-verl-dev}"
+NAME="${NAME:-verl-dev2}"
 WORKDIR_IN_CONTAINER="${WORKDIR_IN_CONTAINER:-/workspace/verl}"
 
 # behavior toggles
 PULL="${PULL:-0}"                 # 1 = docker pull image each run
-RECREATE="${RECREATE:-1}"         # 1 = delete + recreate container each run
+RECREATE="${RECREATE:-0}"         # 1 = delete + recreate container each run
 AS_USER="${AS_USER:-0}"           # 1 = run container as host UID/GID
 MOUNT_CACHES="${MOUNT_CACHES:-1}" # 1 = mount HF/torch/vllm caches
 NET_HOST="${NET_HOST:-1}"         # 1 = --net=host (recommended for vLLM/NCCL)

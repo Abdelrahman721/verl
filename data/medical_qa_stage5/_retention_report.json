@@ -1,0 +1,92 @@
+{
+  "params": {
+    "target_total": 9000,
+    "general_budget": 2000,
+    "medical_budget": 3000,
+    "bench_budget": 1250,
+    "threshold": 0.6,
+    "seed": 5051,
+    "seed_offsets": {
+      "general": 0,
+      "medical": 1,
+      "bench": 2,
+      "topup": 3
+    }
+  },
+  "pool_sizes": {
+    "general": 2000,
+    "medical": 3000,
+    "bench": 1250,
+    "coding_unmastered": 2047,
+    "medical_topup": 703
+  },
+  "final_rows": 9000,
+  "data_source_counts": {
+    "local/dolci-chat-32b": 663,
+    "local/dolci-ifeval-32b": 956,
+    "local/safety-dpo-reference": 381,
+    "medical_qa": 3472,
+    "medical_conv": 231,
+    "medical_benchmark_numeric": 126,
+    "medical_benchmark_text": 528,
+    "medical_benchmark_mcq": 565,
+    "medical_benchmark_medec": 31,
+    "snomed_sl": 1711,
+    "sl": 336
+  },
+  "task_type_counts": {
+    "None": 5703,
+    "generation": 685,
+    "mcq": 443,
+    "classification": 122,
+    "snomed_single_label": 1711,
+    "icd_multi_label": 336
+  },
+  "unified_extra_info": [
+    "baseline_model",
+    "baseline_response",
+    "custom_id",
+    "index",
+    "split",
+    "user_prompt",
+    "constraint",
+    "constraint_type",
+    "key",
+    "tag",
+    "eval_mode",
+    "question",
+    "question_id",
+    "source",
+    "source_article",
+    "difficulty",
+    "type_id",
+    "specialty",
+    "topic_group",
+    "audience",
+    "parent_id",
+    "parent_conv_id",
+    "sub_conv_id",
+    "sub_index",
+    "total_subs",
+    "task_type",
+    "helm_scenario",
+    "entry",
+    "raw_id",
+    "sct_id",
+    "label",
+    "code",
+    "system"
+  ],
+  "output_path": "/data/abdelrahman/verl/data/medical_qa_stage5/retention.parquet",
+  "sources": {
+    "general_dir": "/data/abdelrahman/verl/data/full_mix/train",
+    "medical_source": "/data/abdelrahman/verl/data/medical_qa/train.parquet",
+    "bench_source": "/data/abdelrahman/verl/data/medical_qa_stage3/train.parquet",
+    "coding_source": "/data/abdelrahman/verl/data/medical_qa_stage4/train_coding_only.parquet"
+  },
+  "caches": {
+    "medical_cache": "/data/abdelrahman/verl/data/medical_qa_stage3/_stats_cache.json",
+    "bench_cache": "/data/abdelrahman/verl/data/medical_qa_stage4/_bench_retention_cache.json",
+    "stage4_cache": "/data/abdelrahman/verl/data/medical_qa_stage5/_stage4_retention_cache.json"
+  }
+}

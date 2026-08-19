@@ -1,0 +1,20 @@
+{
+  "local/dolci-ifeval-32b": [
+    7462,
+    7462,
+    7462,
+    7461
+  ],
+  "local/dolci-chat-32b": [
+    5177,
+    5177,
+    5177,
+    5177
+  ],
+  "local/safety-dpo-reference": [
+    2971,
+    2970,
+    2970,
+    2970
+  ]
+}

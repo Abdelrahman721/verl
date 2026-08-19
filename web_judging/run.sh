@@ -17,16 +17,16 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
-export CUDA_VISIBLE_DEVICES=0,1
+export CUDA_VISIBLE_DEVICES=0,1,2,3
 
 # ---- policy / vLLM ----------------------------------------------------------
-export POLICY_MODEL_PATH="${POLICY_MODEL_PATH:-/data/abdelrahman/verl/checkpoints/RL-Exps/medical-qa-fresh/global_step_380/merged_hf_model}"
+export POLICY_MODEL_PATH="${POLICY_MODEL_PATH:-/data/abdelrahman/verl/checkpoints/RL-Exps/medical-qa-stage10-ddx/global_step_74/merged_hf_model}"
 export POLICY_MODEL_NAME="${POLICY_MODEL_NAME:-medical-qa}"
 export VLLM_PORT="${VLLM_PORT:-8001}"
 export POLICY_API_BASE="${POLICY_API_BASE:-http://127.0.0.1:${VLLM_PORT}/v1}"
 export POLICY_API_KEY="${POLICY_API_KEY:-EMPTY}"   # vLLM ignores it; client needs non-empty
 export POLICY_MAX_LEN="${POLICY_MAX_LEN:-32768}"
-export POLICY_TP="${POLICY_TP:-2}"                 # tensor-parallel size (requirement: 2)
+export POLICY_TP="${POLICY_TP:-4}"                 # tensor-parallel size (requirement: 2)
 export GPU_MEM_UTIL="${GPU_MEM_UTIL:-0.85}"
 # generation sampling — defaults mirror medical-qa *validation* settings
 export GEN_TEMPERATURE="${GEN_TEMPERATURE:-0.7}"

@@ -191,10 +191,26 @@ def call_judge(
     if response_format:
         kwargs["response_format"] = response_format
 
+    extra_body: dict = {}
+
     # For Qwen3-family thinking models, turn off CoT in the chat template
     # so the output is JSON-only (safe to pass; non-Qwen models ignore it).
     if os.environ.get("FULL_MIX_JUDGE_DISABLE_THINKING", "1") != "0":
-        kwargs["extra_body"] = {"chat_template_kwargs": {"enable_thinking": False}}
+        extra_body["chat_template_kwargs"] = {"enable_thinking": False}
+
+    # OpenRouter's provider-agnostic reasoning switch. The chat_template_kwargs
+    # flag above is a Qwen-ism that DeepSeek and friends ignore, so on
+    # OpenRouter this is the one that actually stops the model reasoning.
+    # Measured on deepseek-v4-flash-0731: 3.66s -> 0.59s median per verdict,
+    # completion tokens 100 -> 33.
+    #
+    # Off by default: enabling it changes judge behaviour for the RL training
+    # rewards too, so opt in explicitly (FULL_MIX_JUDGE_DISABLE_REASONING=1).
+    if os.environ.get("FULL_MIX_JUDGE_DISABLE_REASONING", "0") != "0":
+        extra_body["reasoning"] = {"enabled": False}
+
+    if extra_body:
+        kwargs["extra_body"] = extra_body
 
     last_err: Optional[BaseException] = None
     attempts_made = 0
@@ -244,7 +260,7 @@ def call_judge(
             last_err = e
             if attempt < max_retries and _is_transient(e):
                 # Exponential backoff with small jitter.
-                delay = (2 ** attempt) + random.uniform(0.0, 0.5)
+                delay = (2 ** attempt) + random.uniform(0.0, 4)
                 logger.warning(
                     "Judge call failed (attempt %d/%d): %s: %s; retrying in %.1fs",
                     attempt + 1, max_retries + 1, type(e).__name__, e, delay,

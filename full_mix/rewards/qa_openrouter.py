@@ -101,7 +101,7 @@ REFUSAL_REWARD = float(os.environ.get("QA_JUDGE_REFUSAL_REWARD", "0.5"))
 # R = words(candidate_answer) / words(gold_text). No penalty if R <= threshold;
 # linear ramp k * (R - threshold) above it, capped at LEN_PENALTY_MAX.
 # Only over-long is penalized (under-length is already caught by completeness).
-LEN_PENALTY_THRESHOLD = float(os.environ.get("QA_LEN_PENALTY_THRESHOLD", "7.0"))
+LEN_PENALTY_THRESHOLD = float(os.environ.get("QA_LEN_PENALTY_THRESHOLD", "14.0"))
 LEN_PENALTY_K         = float(os.environ.get("QA_LEN_PENALTY_K",         "0.05"))
 LEN_PENALTY_MAX       = float(os.environ.get("QA_LEN_PENALTY_MAX",       "0.2"))
 
@@ -290,12 +290,10 @@ Step 2 — Pick a score within the category's range:
 
 This dimension captures how well the answer communicates and how much useful depth it provides beyond the bare minimum.
 
-Presentation is part of clarity here. A multi-part answer rendered as a single dense paragraph — no paragraph breaks, no section headers or bullet lists where they would aid comprehension — reads worse than the same content with appropriate structural breaks. Do NOT grade the specific *choice* of structure (markdown headers vs labelled paragraphs vs numbered lists); DO grade the absence of any structure on an answer that warrants it as a clarity defect — typically BASIC or DISORGANIZED depending on severity.
-
 Step 1 — Classify into ONE category:
-- EXCEPTIONAL: Provides genuine clinical insight — helpful context, relevant mechanisms, practical considerations, or connections that enrich understanding. Well-structured AND well-calibrated: elaborates where elaboration genuinely adds clinical value, and stays tight where it does not. Right-sized concision is itself a positive signal — but do NOT confuse brevity-for-its-own-sake with insight, and do NOT punish appropriate elaboration. A thorough answer that earns its length is EXCEPTIONAL; brevity that omits useful detail is not.
+- EXCEPTIONAL: Provides genuine clinical insight — helpful context, relevant mechanisms, practical considerations, or connections that enrich understanding. Well-structured AND well-calibrated.Do NOT punish appropriate elaboration. A thorough answer that earns its length is EXCEPTIONAL; brevity that omits useful detail is not.
 - CLEAR: Answers the question clearly with good organization. Most competent answers belong here.
-- BASIC: Understandable but exhibits one or more of: weak organization, missing relevant detail, *substantial padding or repetition that does not add clinical value*, or *drifts into tangential topics the question did not ask about* — even when those topics are themselves correct and coherent. Coherent off-topic elaboration is still off-topic.
+- BASIC: Understandable but exhibits one or more of: weak organization, missing relevant detail, *substantial padding or repetition that does not add clinical value* Coherent off-topic elaboration is still off-topic.
 - DISORGANIZED: Hard to follow, poorly structured, too brief to convey the answer, or *so verbose / off-scope that the actual answer is hard to extract from the surrounding content*.
 - INCOMPREHENSIBLE: Cannot be meaningfully parsed.
 

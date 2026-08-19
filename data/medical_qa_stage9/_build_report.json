@@ -1,0 +1,20 @@
+{
+  "sources": {
+    "mlb": {
+      "train": "/home/mbinakba/mcs-instruct-dataset/avey_mlb_train_dataset.parquet",
+      "val": "/home/mbinakba/mcs-instruct-dataset/avey_mlb_test_dataset.parquet",
+      "task_type": "icd10_multilabel",
+      "epochs": 3,
+      "gold_kind": "csv_string"
+    },
+    "snomed_ml": {
+      "train": "/data/muhsen/repos/finalize-dataset/abdelrahman_rl/final_ml_real.parquet",
+      "val": "/data/muhsen/repos/finalize-dataset/abdelrahman_rl/final_ml_real_test.parquet",
+      "task_type": "snomed_multilabel",
+      "epochs": 8,
+      "gold_kind": "json_string_passthrough"
+    }
+  },
+  "train_rows": 1748,
+  "val_rows": 145
+}

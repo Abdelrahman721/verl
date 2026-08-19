@@ -1,0 +1,49 @@
+{
+  "model": "/data/abdelrahman/qwen-sft/full_scale/out-qwen3-4b/dual-mode-sft-tagged",
+  "sampling": {
+    "n": 4,
+    "temperature": 1.0,
+    "top_p": 1.0,
+    "max_tokens": 8192
+  },
+  "min_think_chars": 200,
+  "by_source_mode": {
+    "chat/instant": {
+      "n": 800,
+      "adherence_rate": 0.9925,
+      "wrong_mode": 1,
+      "malformed": 5,
+      "truncated": 0,
+      "think_chars_p50": 0,
+      "answer_chars_p50": 2122
+    },
+    "chat/thinking": {
+      "n": 800,
+      "adherence_rate": 0.95375,
+      "wrong_mode": 0,
+      "malformed": 37,
+      "truncated": 36,
+      "think_chars_p50": 4423,
+      "answer_chars_p50": 2011
+    },
+    "ifeval/instant": {
+      "n": 800,
+      "adherence_rate": 0.99375,
+      "wrong_mode": 1,
+      "malformed": 4,
+      "truncated": 2,
+      "think_chars_p50": 0,
+      "answer_chars_p50": 491
+    },
+    "ifeval/thinking": {
+      "n": 800,
+      "adherence_rate": 0.945,
+      "wrong_mode": 0,
+      "malformed": 44,
+      "truncated": 40,
+      "think_chars_p50": 6674,
+      "answer_chars_p50": 518
+    }
+  },
+  "overall_adherence": 0.97125
+}

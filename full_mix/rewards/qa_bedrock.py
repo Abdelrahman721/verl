@@ -76,7 +76,7 @@ REFUSAL_REWARD = float(os.environ.get("QA_JUDGE_REFUSAL_REWARD", "0.8"))
 # R = words(candidate_answer) / words(gold_text). No penalty if R <= threshold;
 # linear ramp k * (R - threshold) above it, capped at LEN_PENALTY_MAX.
 # Only over-long is penalized (under-length is already caught by completeness).
-LEN_PENALTY_THRESHOLD = float(os.environ.get("QA_LEN_PENALTY_THRESHOLD", "7.0"))
+LEN_PENALTY_THRESHOLD = float(os.environ.get("QA_LEN_PENALTY_THRESHOLD", "14.0"))
 LEN_PENALTY_K         = float(os.environ.get("QA_LEN_PENALTY_K",         "0.05"))
 LEN_PENALTY_MAX       = float(os.environ.get("QA_LEN_PENALTY_MAX",       "0.2"))
 

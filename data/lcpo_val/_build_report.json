@@ -1,0 +1,67 @@
+{
+  "rungs": [
+    256,
+    512,
+    1024,
+    2048,
+    4000,
+    6000
+  ],
+  "eval_sets": {
+    "gsm8k_eval.parquet": 100,
+    "ifbench_eval.parquet": 100,
+    "ifeval_eval.parquet": 100,
+    "math500_eval.parquet": 100
+  },
+  "rows_per_variant": 400,
+  "variants": {
+    "val_budget_00256": {
+      "path": "/data/abdelrahman/verl/data/lcpo_val/val_budget_00256.parquet",
+      "rows": 400,
+      "mode": "budget",
+      "budget": 256
+    },
+    "val_budget_00512": {
+      "path": "/data/abdelrahman/verl/data/lcpo_val/val_budget_00512.parquet",
+      "rows": 400,
+      "mode": "budget",
+      "budget": 512
+    },
+    "val_budget_01024": {
+      "path": "/data/abdelrahman/verl/data/lcpo_val/val_budget_01024.parquet",
+      "rows": 400,
+      "mode": "budget",
+      "budget": 1024
+    },
+    "val_budget_02048": {
+      "path": "/data/abdelrahman/verl/data/lcpo_val/val_budget_02048.parquet",
+      "rows": 400,
+      "mode": "budget",
+      "budget": 2048
+    },
+    "val_budget_04000": {
+      "path": "/data/abdelrahman/verl/data/lcpo_val/val_budget_04000.parquet",
+      "rows": 400,
+      "mode": "budget",
+      "budget": 4000
+    },
+    "val_budget_06000": {
+      "path": "/data/abdelrahman/verl/data/lcpo_val/val_budget_06000.parquet",
+      "rows": 400,
+      "mode": "budget",
+      "budget": 6000
+    },
+    "val_free": {
+      "path": "/data/abdelrahman/verl/data/lcpo_val/val_free.parquet",
+      "rows": 400,
+      "mode": "free",
+      "budget": -1
+    },
+    "val_nothink": {
+      "path": "/data/abdelrahman/verl/data/lcpo_val/val_nothink.parquet",
+      "rows": 400,
+      "mode": "nothink",
+      "budget": -1
+    }
+  }
+}

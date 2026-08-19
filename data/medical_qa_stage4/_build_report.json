@@ -1,0 +1,20 @@
+{
+  "sources": {
+    "snomed": "/data/muhsen/repos/finalize-dataset/abdelrahman_rl/final_sl_subsampled.parquet",
+    "icd": "/home/mbinakba/mcs-instruct-dataset/avey_icd_single_label_rl_train_dataset.parquet"
+  },
+  "rows": {
+    "snomed": 15000,
+    "icd": 10000,
+    "total": 25000
+  },
+  "data_source_counts": {
+    "snomed_sl": 15000,
+    "sl": 10000
+  },
+  "task_type_counts": {
+    "snomed_single_label": 15000,
+    "icd_multi_label": 10000
+  },
+  "output_train_parquet": "/data/abdelrahman/verl/data/medical_qa_stage4/train.parquet"
+}

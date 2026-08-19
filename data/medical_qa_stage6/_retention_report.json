@@ -1,0 +1,81 @@
+{
+  "params": {
+    "general_budget": 405,
+    "medical_budget": 608,
+    "unmastered_cap": 1000,
+    "threshold": 0.6,
+    "seed": 6051,
+    "seed_offsets": {
+      "general": 0,
+      "medical": 1,
+      "unmastered": 2
+    }
+  },
+  "pool_sizes": {
+    "general": 405,
+    "medical": 608,
+    "unmastered_kept": 1000,
+    "unmastered_raw": 1898
+  },
+  "final_rows": 2013,
+  "data_source_counts": {
+    "local/dolci-chat-32b": 83,
+    "local/dolci-ifeval-32b": 120,
+    "local/safety-dpo-reference": 202,
+    "medical_conv": 33,
+    "medical_qa": 575,
+    "ml": 2,
+    "if": 681,
+    "snomed_ml": 1,
+    "snomed_if": 316
+  },
+  "task_type_counts": {
+    "None": 1013,
+    "icd10_multilabel": 2,
+    "icd10_instruction_follow": 681,
+    "snomed_multilabel": 1,
+    "snomed_instruction_follow": 316
+  },
+  "unified_extra_info": [
+    "baseline_model",
+    "baseline_response",
+    "custom_id",
+    "index",
+    "split",
+    "user_prompt",
+    "constraint",
+    "constraint_type",
+    "key",
+    "tag",
+    "eval_mode",
+    "question",
+    "question_id",
+    "source",
+    "source_article",
+    "difficulty",
+    "type_id",
+    "specialty",
+    "topic_group",
+    "audience",
+    "parent_id",
+    "parent_conv_id",
+    "sub_conv_id",
+    "sub_index",
+    "total_subs",
+    "codes",
+    "prompt_id",
+    "task_type",
+    "code",
+    "entry",
+    "raw_id",
+    "gt_sct_ids",
+    "gt_labels",
+    "rule",
+    "original_text",
+    "helm_scenario",
+    "sct_id",
+    "label",
+    "system"
+  ],
+  "output_path": "/data/abdelrahman/verl/data/medical_qa_stage6/retention.parquet"
+}

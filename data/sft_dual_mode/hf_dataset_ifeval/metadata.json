@@ -1,0 +1,21 @@
+{
+  "kind": "sft",
+  "rows": 24339,
+  "columns": [
+    "messages",
+    "id",
+    "source",
+    "token_length"
+  ],
+  "thinking_rows": 12160,
+  "instant_rows": 12179,
+  "max_tokens": 32768,
+  "dropped_over_max_tokens": 0,
+  "token_length_tokenizer": "/data/abdelrahman/qwen-sft/full_scale/experiment/final",
+  "sources": [
+    {
+      "source": "dual-mode-ifeval-rl60",
+      "records_in": 24339
+    }
+  ]
+}

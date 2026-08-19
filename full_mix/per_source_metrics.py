@@ -59,6 +59,27 @@ def _per_seq_advantages(batch) -> np.ndarray | None:
     return ((adv * mask).sum(-1) / tok).cpu().numpy()
 
 
+def _response_length(batch) -> np.ndarray:
+    """Per-sequence response length in real (non-padding) tokens.
+
+    Uses the attention mask, the way verl's own compute_data_metrics does. The
+    previous implementation counted ``responses.ne(0)``, but this tokenizer pads
+    with <|endoftext|> = 151643, not 0 — so padding counted as content and every
+    source reported a length pinned at max_response_length.
+    """
+    responses = batch.batch["responses"]
+    attention_mask = batch.batch.get("attention_mask", None)
+    if attention_mask is not None:
+        # The response occupies the trailing `response_length` positions.
+        return attention_mask[:, -responses.shape[-1]:].sum(-1).detach().cpu().numpy()
+    return responses.ne(_pad_token_id(batch)).sum(-1).detach().cpu().numpy()
+
+
+def _pad_token_id(batch) -> int:
+    meta = getattr(batch, "meta_info", None) or {}
+    return int(meta.get("pad_token_id", 151643))
+
+
 def _compute_per_source_metrics(batch) -> dict:
     """Group sequence-level score / reward / length / advantage by data_source."""
     if "data_source" not in batch.non_tensor_batch:
@@ -67,7 +88,7 @@ def _compute_per_source_metrics(batch) -> dict:
     sequence_score = batch.batch["token_level_scores"].sum(-1).detach().cpu().numpy()
     sequence_reward = batch.batch["token_level_rewards"].sum(-1).detach().cpu().numpy()
     sources = np.asarray(batch.non_tensor_batch["data_source"])
-    response_length = batch.batch["responses"].ne(0).sum(-1).detach().cpu().numpy()
+    response_length = _response_length(batch)
     per_seq_adv = _per_seq_advantages(batch)
 
     out: dict = {}
@@ -85,6 +106,81 @@ def _compute_per_source_metrics(batch) -> dict:
             out[f"critic/per_source/{src}/adv/mean"] = float(a.mean())
             out[f"critic/per_source/{src}/adv/std"] = float(a.std())
             out[f"critic/per_source/{src}/adv/zero_var_frac"] = float((np.abs(a) < 1e-6).mean())
+
+    return out
+
+
+# Budget buckets for the length curves. Edges match the validation rungs so the
+# in-training view and the eval ladder line up.
+_BUDGET_EDGES = [0, 384, 768, 1536, 3024, 5000, 10**9]
+_BUDGET_LABELS = ["le384", "le768", "le1536", "le3024", "le5000", "gt5000"]
+
+# Emitted per sample by LCPORewardManager. Mean of each, per group.
+_LCPO_MEAN_KEYS = (
+    "task_score", "n_think", "n_answer", "abs_len_err", "rel_len_err",
+    "len_mult", "is_wellformed", "nothink_format_ok", "truncated",
+    "chat_exact_half",
+)
+
+
+def _budget_bucket(b: float) -> str:
+    for lo, label in zip(_BUDGET_EDGES[1:], _BUDGET_LABELS):
+        if b <= lo:
+            return label
+    return _BUDGET_LABELS[-1]
+
+
+def _compute_lcpo_metrics(batch) -> dict:
+    """Length / mode curves for budget training.
+
+    Grouped by think_mode, and for budgeted rows also by budget bucket, because
+    the three modes are scored by different rules — a combined average mixes
+    populations that are not comparable, which is the easiest way to miss
+    unconstrained mode quietly drifting.
+
+    Reads only from non_tensor_batch, which is where the reward manager's
+    numeric extra keys land. Returns {} when this is not an LCPO run.
+    """
+    ntb = batch.non_tensor_batch
+    if "n_think" not in ntb:
+        return {}
+
+    n = len(batch)
+    vals = {k: np.asarray(ntb[k], dtype=float) for k in _LCPO_MEAN_KEYS if k in ntb}
+    if not vals:
+        return {}
+    budgets = np.asarray(ntb["think_budget"], dtype=float) if "think_budget" in ntb else np.full(n, -1.0)
+
+    # Derive the mode from the NUMERIC reward keys rather than the dataset's
+    # `think_mode` string column. Dataset columns do not reach the trainer batch
+    # (see the note in compute_data_metrics_with_sources), and reward_extra_info
+    # can only carry numbers anyway.
+    if "think_mode" in ntb:
+        modes = np.asarray(ntb["think_mode"])
+    else:
+        is_nothink = np.asarray(ntb["is_nothink_mode"], dtype=float) if "is_nothink_mode" in ntb else np.zeros(n)
+        modes = np.where(is_nothink > 0.5, "nothink", np.where(budgets > 0, "budget", "free"))
+
+    out: dict = {}
+
+    def emit(prefix: str, mask: np.ndarray) -> None:
+        if not mask.any():
+            return
+        out[f"{prefix}/count"] = int(mask.sum())
+        for key, arr in vals.items():
+            out[f"{prefix}/{key}/mean"] = float(arr[mask].mean())
+
+    for mode in np.unique(modes):
+        mask = modes == mode
+        emit(f"critic/lcpo/mode_{mode}", mask)
+        # Per-budget curves only make sense where a budget exists. This is the
+        # monotonicity view: task_score by budget bucket.
+        if mode != "budget":
+            continue
+        buckets = np.array([_budget_bucket(b) for b in budgets])
+        for label in _BUDGET_LABELS:
+            emit(f"critic/lcpo/budget_{label}", mask & (buckets == label))
+
     return out
 
 
@@ -95,6 +191,18 @@ def compute_data_metrics_with_sources(batch, use_critic: bool = True) -> dict:
     except Exception as e:  # never let metrics break the training step
         metrics["critic/per_source/_error"] = 1.0
         print(f"[per_source_metrics] skipped, error: {e!r}", flush=True)
+    # Called separately, NOT from inside _compute_per_source_metrics, because
+    # that function returns early when `data_source` is absent — and it is
+    # absent here. With rule-based rewards `enable_agent_reward_loop` is true,
+    # so ray_trainer passes reward_loop_worker_handles and agent_loop.py skips
+    # `non_tensor_batch.update(input_non_tensor_batch)`, dropping every dataset
+    # column from the trainer's batch. The LCPO curves ride the reward_extra_info
+    # channel instead, which IS propagated.
+    try:
+        metrics.update(_compute_lcpo_metrics(batch))
+    except Exception as e:
+        metrics["critic/lcpo/_error"] = 1.0
+        print(f"[per_source_metrics] lcpo metrics skipped, error: {e!r}", flush=True)
     return metrics
 
 

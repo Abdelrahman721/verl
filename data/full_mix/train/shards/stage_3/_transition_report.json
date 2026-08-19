@@ -1,0 +1,43 @@
+{
+  "stage": 2,
+  "next_stage": 3,
+  "threshold": 0.55,
+  "rollout_dir": "/root/verl_dumps/curriculum_stage2_rollouts",
+  "stage_k_total": 25622,
+  "mastered_total": 12778,
+  "carried_total": 12844,
+  "per_source_classification": {
+    "local/dolci-ifeval-32b": {
+      "mastered": 6901,
+      "carried": 5899,
+      "total": 12800
+    },
+    "local/dolci-chat-32b": {
+      "mastered": 3084,
+      "carried": 6073,
+      "total": 9157
+    },
+    "local/safety-dpo-reference": {
+      "mastered": 2793,
+      "carried": 872,
+      "total": 3665
+    }
+  },
+  "next_stage_files": {
+    "local/dolci-ifeval-32b": {
+      "raw": 7462,
+      "carried": 5899,
+      "total": 13361
+    },
+    "local/dolci-chat-32b": {
+      "raw": 5177,
+      "carried": 6073,
+      "total": 11250
+    },
+    "local/safety-dpo-reference": {
+      "raw": 2970,
+      "carried": 872,
+      "total": 3842
+    }
+  }
+}

@@ -1,0 +1,146 @@
+{
+  "seed": 23,
+  "sources": {
+    "qa": [
+      "processed/rl/uptodate/v1/qa_items_with_keypoints.jsonl",
+      "processed/rl/books/v2/qa_items_with_keypoints.jsonl"
+    ],
+    "conv": [
+      "processed/rl/uptodate/v1/sub_conversations.jsonl",
+      "processed/rl/books/v2/sub_conversations.jsonl"
+    ]
+  },
+  "qa_load": {
+    "total": 297294,
+    "skipped_no_keypoints": 269,
+    "kept": 297025
+  },
+  "conv_load": {
+    "total": 19310,
+    "skipped_no_type_descriptor": 0,
+    "kept": 19310,
+    "unresolved_types": {}
+  },
+  "val_carve": {
+    "qa_items": 40,
+    "conv_parents": 4
+  },
+  "counts": {
+    "train": {
+      "total": 316287,
+      "qa": 296985,
+      "conv": 19302
+    },
+    "val": {
+      "total": 48,
+      "qa": 40,
+      "conv": 8
+    }
+  },
+  "train_difficulty": {
+    "medium": 105519,
+    "easy": 71670,
+    "hard": 139098
+  },
+  "train_source": {
+    "books": 163198,
+    "uptodate": 153089
+  },
+  "train_type_id": {
+    "cross_system_integration": 11545,
+    "conceptual_foundation": 16301,
+    "clinical_decision_comparison": 32453,
+    "evidence_quality_limitations": 17431,
+    "clinical_scenario": 59324,
+    "mechanistic_deep_dive": 22600,
+    "safety_risk_benefit": 33865,
+    "quantitative_clinical_interpretation": 8836,
+    "mechanism_to_practice": 33406,
+    "synthesis_integration": 39578,
+    "CT_13": 271,
+    "IC_03": 475,
+    "IC_08": 316,
+    "appropriate_uncertainty": 20999,
+    "SC_11": 316,
+    "CT_08": 75,
+    "MI_09": 288,
+    "CT_09": 184,
+    "FMT_01": 553,
+    "MI_10": 298,
+    "SC_02": 318,
+    "FMT_08": 466,
+    "IC_02": 258,
+    "FMT_05": 424,
+    "IC_01": 286,
+    "clinical_case_reasoning": 274,
+    "IC_04": 439,
+    "MI_05": 431,
+    "MI_08": 434,
+    "CT_15": 130,
+    "CT_01": 173,
+    "FMT_03": 419,
+    "IC_07": 424,
+    "CT_19": 196,
+    "FMT_04": 385,
+    "CT_16": 206,
+    "FMT_06": 397,
+    "IC_09": 423,
+    "MI_01": 380,
+    "SC_06": 129,
+    "FMT_02": 426,
+    "CT_10": 143,
+    "CT_20": 235,
+    "IC_06": 300,
+    "CT_26": 107,
+    "CT_25": 151,
+    "CT_04": 233,
+    "SC_14": 343,
+    "FMT_07": 495,
+    "IC_05": 488,
+    "CT_07": 86,
+    "CT_18": 218,
+    "CT_30": 126,
+    "SC_05": 260,
+    "CT_05": 162,
+    "MI_02": 320,
+    "SC_09": 254,
+    "CT_21": 157,
+    "MI_06": 304,
+    "IC_10": 289,
+    "SC_13": 152,
+    "CT_22": 179,
+    "CT_03": 149,
+    "MI_03": 299,
+    "MI_07": 282,
+    "MI_04": 297,
+    "SC_03": 312,
+    "CT_28": 108,
+    "SC_12": 115,
+    "CT_23": 151,
+    "SC_01": 283,
+    "MI_11": 275,
+    "SC_04": 252,
+    "SC_08": 296,
+    "ranked_differential": 232,
+    "CT_17": 150,
+    "CT_11": 156,
+    "CT_14": 211,
+    "discriminating_features": 141,
+    "SC_10": 117,
+    "SC_15": 142,
+    "CT_12": 288,
+    "CT_27": 127,
+    "CT_06": 111,
+    "CT_29": 150,
+    "SC_16": 139,
+    "CT_24": 109,
+    "SC_07": 136,
+    "CT_02": 125
+  },
+  "outputs": {
+    "train": "processed/rl/combined/v1/train.parquet",
+    "val": "processed/rl/combined/v1/val.parquet",
+    "sample": "samples/rl/combined/v1/sample_train.jsonl",
+    "verl_symlink": "/data/hazem/verl/data/medical_qa_rl_full"
+  }
+}

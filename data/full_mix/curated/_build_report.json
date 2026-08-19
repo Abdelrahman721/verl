@@ -1,0 +1,63 @@
+{
+  "rollout_dir": "/data/abdelrahman/verl/general_rollouts",
+  "source_train_dir": "/data/abdelrahman/verl/data/full_mix/train",
+  "chat_variant": "chat_with_baseline",
+  "hard_threshold": 0.6,
+  "easy_threshold": 0.8,
+  "easy_fraction": 0.2,
+  "seed": 42,
+  "by_source": {
+    "local/dolci-ifeval-32b": {
+      "filename": "ifeval_train.parquet",
+      "source": "/data/abdelrahman/verl/data/full_mix/train/ifeval_train.parquet",
+      "output": "/data/abdelrahman/verl/data/full_mix/curated/ifeval_train.parquet",
+      "total_in_run": 29690,
+      "hard_count": 15140,
+      "mid_count": 7918,
+      "easy_count_available": 6632,
+      "easy_count_sampled": 3785,
+      "output_total": 18925,
+      "easy_fraction_actual": 0.2,
+      "rows_written": 18925
+    },
+    "local/dolci-chat-32b": {
+      "filename": "chat_with_baseline_train.parquet",
+      "source": "/data/abdelrahman/verl/data/full_mix/train/chat_with_baseline_train.parquet",
+      "output": "/data/abdelrahman/verl/data/full_mix/curated/chat_with_baseline_train.parquet",
+      "total_in_run": 20630,
+      "hard_count": 10254,
+      "mid_count": 6531,
+      "easy_count_available": 3845,
+      "easy_count_sampled": 2564,
+      "output_total": 12818,
+      "easy_fraction_actual": 0.20003120611639882,
+      "rows_written": 12818
+    },
+    "local/safety-dpo-reference": {
+      "filename": "safety_train.parquet",
+      "source": "/data/abdelrahman/verl/data/full_mix/train/safety_train.parquet",
+      "output": "/data/abdelrahman/verl/data/full_mix/curated/safety_train.parquet",
+      "total_in_run": 11845,
+      "hard_count": 1946,
+      "mid_count": 1939,
+      "easy_count_available": 7960,
+      "easy_count_sampled": 487,
+      "output_total": 2433,
+      "easy_fraction_actual": 0.20016440608302508,
+      "rows_written": 2433
+    },
+    "local/avey-identity": {
+      "filename": "identity_train.parquet",
+      "source": "/data/abdelrahman/verl/data/full_mix/train/identity_train.parquet",
+      "output": "/data/abdelrahman/verl/data/full_mix/curated/identity_train.parquet",
+      "total_in_run": 1574,
+      "hard_count": 257,
+      "mid_count": 341,
+      "easy_count_available": 976,
+      "easy_count_sampled": 64,
+      "output_total": 321,
+      "easy_fraction_actual": 0.19937694704049844,
+      "rows_written": 321
+    }
+  }
+}

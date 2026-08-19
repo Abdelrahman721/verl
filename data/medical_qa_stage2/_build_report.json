@@ -1,0 +1,39 @@
+{
+  "cache": "/data/abdelrahman/verl/data/medical_qa_stage2/_stats_cache.json",
+  "threshold": 0.6,
+  "conv_keep_n_requested": 5000,
+  "conv_keep_fraction_requested": null,
+  "conv_keep_seed": 1234,
+  "pools": {
+    "A_carry_forward": {
+      "rows": 5899,
+      "data_source": {
+        "medical_qa": 5715,
+        "medical_conv": 184
+      },
+      "source_indices_count": 5899
+    },
+    "B_unseen_conv_sample": {
+      "rows": 5000,
+      "source_indices_count": 5000,
+      "unseen_pool_total": 17357
+    }
+  },
+  "carve": {
+    "carve_clinical_reasoning.parquet": {
+      "rows": 458,
+      "after_dedup_total": 458
+    },
+    "carve_lay_patient_tier.parquet": {
+      "rows": 3518,
+      "after_dedup_total": 3518
+    }
+  },
+  "output_train_parquet": "/data/abdelrahman/verl/data/medical_qa_stage2/train.parquet",
+  "total_rows": 14875,
+  "total_data_source_counts": {
+    "medical_qa": 6173,
+    "medical_conv": 8702
+  },
+  "mastered_source_indices_count": 26639
+}

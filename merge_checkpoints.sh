@@ -5,7 +5,7 @@ set -euo pipefail
 # Each merged model is written to the checkpoint dir (the source path minus the trailing "actor").
 
 ACTOR_DIRS=(
-    "/data/abdelrahman/verl/checkpoints/RL-Exps/medical-qa-fresh/global_step_100/actor"
+    "/data/abdelrahman/verl/checkpoints/RL-Exps/chat-ifeval-sync-4b/global_step_60/actor"
 )
 
 for actor_dir in "${ACTOR_DIRS[@]}"; do

@@ -2,9 +2,9 @@
 set -euo pipefail
 
 SRC_DIR="/data/abdelrahman/verl/checkpoints/RL-Exps/medical-qa-fresh"
-DEST_DIR="/scratch/RL/RL-Exps/gpt"
+DEST_DIR="/scratch/RL/RL-Exps/gpt_restarted"
 
-STEPS=(220 320 400 420 440 460 480)
+STEPS=(340 400 480 520)
 
 mkdir -p "$DEST_DIR"
 

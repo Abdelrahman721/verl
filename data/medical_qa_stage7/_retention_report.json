@@ -1,0 +1,55 @@
+{
+  "params": {
+    "general_budget": 400,
+    "medical_budget": 600,
+    "seed": 7051,
+    "seed_offsets": {
+      "general": 0,
+      "medical": 1
+    }
+  },
+  "pool_sizes": {
+    "general": 400,
+    "medical": 600
+  },
+  "final_rows": 1000,
+  "data_source_counts": {
+    "local/dolci-chat-32b": 82,
+    "local/dolci-ifeval-32b": 118,
+    "local/safety-dpo-reference": 200,
+    "medical_qa": 575,
+    "medical_conv": 25
+  },
+  "task_type_counts": {
+    "None": 1000
+  },
+  "unified_extra_info": [
+    "baseline_model",
+    "baseline_response",
+    "custom_id",
+    "index",
+    "split",
+    "user_prompt",
+    "constraint",
+    "constraint_type",
+    "key",
+    "tag",
+    "eval_mode",
+    "question",
+    "question_id",
+    "source",
+    "source_article",
+    "difficulty",
+    "type_id",
+    "specialty",
+    "topic_group",
+    "audience",
+    "parent_id",
+    "parent_conv_id",
+    "sub_conv_id",
+    "sub_index",
+    "total_subs",
+    "task_type"
+  ],
+  "output_path": "/data/abdelrahman/verl/data/medical_qa_stage7/retention.parquet"
+}

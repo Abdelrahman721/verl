@@ -1,0 +1,82 @@
+{
+  "params": {
+    "threshold": 0.6,
+    "general_budget": 2000,
+    "medical_mastered_budget": 400,
+    "medical_unseen_budget": 2600,
+    "bench_budget": 1250,
+    "seed": 1234
+  },
+  "pools": {
+    "general_per_source": {
+      "chat_with_baseline_train.parquet": 663,
+      "ifeval_train.parquet": 956,
+      "safety_train.parquet": 381
+    },
+    "general_total": 2000,
+    "medical_sampled": 3000,
+    "medical_mastered_requested": 400,
+    "medical_unseen_requested": 2600,
+    "bench_sampled": 1250,
+    "existing_train_pre_retention": 25000,
+    "final_rows": 31250
+  },
+  "data_source_counts": {
+    "snomed_sl": 15000,
+    "sl": 10000,
+    "local/dolci-chat-32b": 663,
+    "local/dolci-ifeval-32b": 956,
+    "local/safety-dpo-reference": 381,
+    "medical_qa": 2846,
+    "medical_conv": 154,
+    "medical_benchmark_mcq": 541,
+    "medical_benchmark_text": 495,
+    "medical_benchmark_numeric": 163,
+    "medical_benchmark_medec": 51
+  },
+  "task_type_counts": {
+    "snomed_single_label": 15000,
+    "icd_multi_label": 10000,
+    "None": 5000,
+    "mcq": 427,
+    "classification": 114,
+    "generation": 709
+  },
+  "unified_extra_info_fields": [
+    "index",
+    "entry",
+    "raw_id",
+    "sct_id",
+    "label",
+    "task_type",
+    "code",
+    "system",
+    "baseline_model",
+    "baseline_response",
+    "custom_id",
+    "split",
+    "user_prompt",
+    "constraint",
+    "constraint_type",
+    "key",
+    "tag",
+    "eval_mode",
+    "question",
+    "question_id",
+    "source",
+    "source_article",
+    "difficulty",
+    "type_id",
+    "specialty",
+    "topic_group",
+    "audience",
+    "parent_id",
+    "parent_conv_id",
+    "sub_conv_id",
+    "sub_index",
+    "total_subs",
+    "helm_scenario"
+  ],
+  "snapshot_before_retention": "/data/abdelrahman/verl/data/medical_qa_stage4/train_coding_only.parquet",
+  "output_train_parquet": "/data/abdelrahman/verl/data/medical_qa_stage4/train.parquet"
+}

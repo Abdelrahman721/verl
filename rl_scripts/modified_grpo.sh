@@ -1,5 +1,8 @@
 set -x
 
+
+nvidia-smi --query-compute-apps=pid --format=csv,noheader | xargs -r kill -9
+
 MODEL_PATH="Qwen/Qwen3-4B-Base"
 TRAIN_FILES="$HOME/data/math/train.parquet"
 VAL_FILES="$HOME/data/math/test.parquet"

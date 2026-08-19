@@ -1,0 +1,26 @@
+{
+  "sources": {
+    "icd10_multilabel": {
+      "train": "/home/mbinakba/mcs-instruct-dataset/avey_icd_multi_label_rl_train_dataset.parquet",
+      "val": "/home/mbinakba/mcs-instruct-dataset/avey_icd_multi_label_rl_test_dataset.parquet",
+      "icd": true
+    },
+    "icd10_instruction_follow": {
+      "train": "/home/mbinakba/mcs-instruct-dataset/avey_icd_if_rl_train_dataset.parquet",
+      "val": "/home/mbinakba/mcs-instruct-dataset/avey_icd_if_rl_test_dataset.parquet",
+      "icd": true
+    },
+    "snomed_multilabel": {
+      "train": "/data/muhsen/repos/finalize-dataset/abdelrahman_rl/final_ml_subsampled.parquet",
+      "val": "/data/muhsen/repos/finalize-dataset/abdelrahman_rl/final_ml_test.parquet",
+      "icd": false
+    },
+    "snomed_instruction_follow": {
+      "train": "/data/muhsen/repos/finalize-dataset/abdelrahman_rl/final_if_subsampled.parquet",
+      "val": "/data/muhsen/repos/finalize-dataset/abdelrahman_rl/final_if_test.parquet",
+      "icd": false
+    }
+  },
+  "train_rows": 35120,
+  "val_rows": 13373
+}
