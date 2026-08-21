@@ -5,7 +5,7 @@ from the number to a length, rather than memorising a handful of lengths.
 Validation does the opposite — fixed rungs, so score-vs-budget is a clean,
 comparable curve across checkpoints. That split is the whole reason both exist.
 
-One parquet per variant, with the four eval sets concatenated inside it:
+One parquet per variant, with the eval sets concatenated inside it:
 
     val_budget_00256.parquet ... val_budget_06000.parquet
     val_free.parquet          (bare /think, no budget)
@@ -50,9 +50,13 @@ from full_mix.common.lcpo_schema import homogenize_extra_info  # noqa: E402
 
 RUNGS = [256, 512, 1024, 2048, 4000, 6000]
 
+# NOTE: ifbench_eval dropped — its constraint IDs are not in full_mix/ifeval/
+# FUNCTION_DICT, so 100% of constraints score 0 (unknown IDs count toward the
+# denominator in ifeval_reward.compute_score, so every IFBench row returns a
+# flat 0.0 no matter what the model writes). Re-add once IFBench checkers are
+# ported from allenai/open-instruct into full_mix/ifeval/instructions.py.
 EVAL_FILES = [
     "gsm8k_eval.parquet",
-    "ifbench_eval.parquet",
     "ifeval_eval.parquet",
     "math500_eval.parquet",
 ]

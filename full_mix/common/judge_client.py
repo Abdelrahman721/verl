@@ -11,6 +11,22 @@ Env vars:
     FULL_MIX_JUDGE_TIMEOUT     — request timeout seconds (default 60)
     FULL_MIX_JUDGE_MAX_RETRIES — exponential backoff attempts (default 3)
     FULL_MIX_JUDGE_MAX_TOKENS  — judge response cap (default 512)
+    FULL_MIX_JUDGE_TEMPERATURE — sampling temperature (default 0.0)
+
+OpenRouter-only routing controls (ignored when API_BASE is not OpenRouter,
+because a plain vLLM server rejects the unknown ``provider`` body field):
+    FULL_MIX_JUDGE_PROVIDER_ONLY       — comma-separated provider slugs to pin
+                                         routing to, e.g. "baidu". Empty = let
+                                         OpenRouter pick from all of them.
+    FULL_MIX_JUDGE_PROVIDER_IGNORE     — comma-separated slugs to exclude.
+    FULL_MIX_JUDGE_REQUIRE_PARAMETERS  — 1 (default) routes only to providers
+                                         that support every parameter we send.
+                                         Without it OpenRouter silently DROPS
+                                         unsupported params (response_format
+                                         included) and routes anyway.
+    FULL_MIX_JUDGE_ALLOW_FALLBACKS     — 0 to hard-fail instead of falling back
+                                         to another provider. Unset = leave to
+                                         OpenRouter's default (fallbacks on).
 """
 
 import json
@@ -30,7 +46,11 @@ _resolved = {
     "API_BASE": os.environ.get("FULL_MIX_JUDGE_API_BASE"),
     "MODEL": os.environ.get("FULL_MIX_JUDGE_MODEL"),
     "DISABLE_THINKING": os.environ.get("FULL_MIX_JUDGE_DISABLE_THINKING"),
+    "DISABLE_REASONING": os.environ.get("FULL_MIX_JUDGE_DISABLE_REASONING"),
     "FORCE_JSON": os.environ.get("FULL_MIX_JUDGE_FORCE_JSON"),
+    "TEMPERATURE": os.environ.get("FULL_MIX_JUDGE_TEMPERATURE"),
+    "PROVIDER_ONLY": os.environ.get("FULL_MIX_JUDGE_PROVIDER_ONLY"),
+    "PROVIDER_IGNORE": os.environ.get("FULL_MIX_JUDGE_PROVIDER_IGNORE"),
     "HAS_KEY": bool(os.environ.get("FULL_MIX_JUDGE_API_KEY")),
 }
 print(f"[judge_client boot pid={os.getpid()}] env resolved: {_resolved}", flush=True)
@@ -38,6 +58,20 @@ print(f"[judge_client boot pid={os.getpid()}] env resolved: {_resolved}", flush=
 
 class JudgeUnavailable(RuntimeError):
     """Raised when the judge client cannot be configured / reached."""
+
+
+class JudgeReasoningOverrun(RuntimeError):
+    """The model burned the whole token budget reasoning and emitted no answer.
+
+    Signature is ``finish_reason == "length"`` with empty ``message.content``:
+    reasoning tokens count against ``max_tokens``, so a model that loops in its
+    chain of thought hits the cap before writing a single content token.
+
+    Kept distinct from JudgeUpstreamError because the correct response differs.
+    A plain upstream error is worth retrying as-is; this one is not — the same
+    request will reason itself into the same wall. ``call_judge`` retries it
+    with reasoning switched off instead.
+    """
 
 
 class JudgeUpstreamError(RuntimeError):
@@ -75,6 +109,69 @@ def _env_float(name: str, default: float) -> float:
     except ValueError:
         logger.warning("Invalid float for %s=%r; using default %f", name, raw, default)
         return default
+
+
+def _env_list(name: str) -> list[str]:
+    """Parse a comma-separated env var into a list of non-empty stripped items."""
+    raw = os.environ.get(name) or ""
+    return [item.strip() for item in raw.split(",") if item.strip()]
+
+
+def _is_openrouter(api_base: Optional[str]) -> bool:
+    return bool(api_base) and "openrouter.ai" in api_base
+
+
+def _provider_block(api_base: Optional[str]) -> dict:
+    """Build OpenRouter's ``provider`` routing object from env.
+
+    Returns {} for non-OpenRouter backends: a self-hosted vLLM server has no
+    such field and rejects the request rather than ignoring it.
+
+    Why this exists: OpenRouter fans a single model out across dozens of
+    independently-operated deployments at different quantizations. They are
+    NOT interchangeable — one bad endpoint returns degenerate output that no
+    parser can rescue, and for an RL reward the provider spread is variance
+    injected straight into the reward function. Pinning removes both.
+    """
+    if not _is_openrouter(api_base):
+        return {}
+
+    provider: dict = {}
+
+    only = _env_list("FULL_MIX_JUDGE_PROVIDER_ONLY")
+    if only:
+        provider["only"] = only
+
+    # `only` is a permission set with no implied priority — OpenRouter still
+    # load-balances within it, so the slowest member sets your median latency.
+    # `order` is the priority list: try these in sequence, fall through on
+    # failure. Use it when you care WHICH provider normally answers.
+    order = _env_list("FULL_MIX_JUDGE_PROVIDER_ORDER")
+    if order:
+        provider["order"] = order
+
+    ignore = _env_list("FULL_MIX_JUDGE_PROVIDER_IGNORE")
+    if ignore:
+        provider["ignore"] = ignore
+
+    # Default ON. We always send response_format; without this OpenRouter
+    # quietly strips it for providers that don't support structured output
+    # and routes there anyway, so the judge silently stops being constrained.
+    if os.environ.get("FULL_MIX_JUDGE_REQUIRE_PARAMETERS", "1") != "0":
+        provider["require_parameters"] = True
+
+    allow_fallbacks = os.environ.get("FULL_MIX_JUDGE_ALLOW_FALLBACKS")
+    if allow_fallbacks is not None and allow_fallbacks != "":
+        provider["allow_fallbacks"] = allow_fallbacks != "0"
+
+    # "throughput" | "latency" | "price". Without this OpenRouter load-balances
+    # across the pool, so the slowest member sets the median latency. Sorting
+    # makes the pool a fast primary plus warm standbys instead of a round-robin.
+    sort = os.environ.get("FULL_MIX_JUDGE_PROVIDER_SORT")
+    if sort:
+        provider["sort"] = sort
+
+    return provider
 
 
 def _get_client():
@@ -117,6 +214,8 @@ def _is_transient(exc: BaseException) -> bool:
         _openai.RateLimitError,
         _openai.InternalServerError,
         JudgeUpstreamError,
+        # Retryable, but only because call_judge drops reasoning first.
+        JudgeReasoningOverrun,
         # OpenRouter/proxy gateways occasionally return a 200 with a malformed
         # / truncated body; the OpenAI SDK surfaces that as a raw
         # JSONDecodeError ("Expecting value: line N column 1") inside
@@ -136,14 +235,39 @@ def _is_transient(exc: BaseException) -> bool:
     return False
 
 
+def _schema_rejected(exc: BaseException, kwargs: dict) -> bool:
+    """True if this 400 looks like "I don't do json_schema" and we can downgrade.
+
+    Provider support for structured output is finer-grained than OpenRouter's
+    routing filter. ``response_format`` in a provider's supported_parameters
+    only promises ``{"type": "json_object"}``; ``json_schema`` is gated behind
+    the separate ``structured_outputs`` flag. Providers advertising the former
+    without the latter (novita/fp8, for one) are therefore routed to even under
+    require_parameters=1, and then hard-400 on the schema variant.
+
+    A 400 is not transient, so without this the call dies and the caller falls
+    back to a neutral reward. Downgrading to json_object costs the schema
+    guarantee but keeps the verdict.
+    """
+    import openai as _openai
+
+    if not isinstance(exc, _openai.BadRequestError):
+        return False
+    rf = kwargs.get("response_format")
+    return isinstance(rf, dict) and rf.get("type") == "json_schema"
+
+
 def call_judge(
     messages: list[dict],
     *,
     validate=None,
     model: Optional[str] = None,
     max_tokens: Optional[int] = None,
-    temperature: float = 0.0,
+    temperature: Optional[float] = None,
     response_format: Optional[dict] = None,
+    schema: Optional[dict] = None,
+    schema_name: str = "verdict",
+    salvage=None,
 ):
     """Send a chat completion to the configured judge.
 
@@ -173,14 +297,37 @@ def call_judge(
     stops thinking-style models from spewing a reasoning preamble before the
     JSON (and blowing through ``max_tokens``). Disable by setting
     ``FULL_MIX_JUDGE_FORCE_JSON=0`` or by passing ``response_format={}``.
+
+    Pass ``schema`` (a JSON Schema dict) to upgrade that from "some JSON
+    object" to strict structured output — ``response_format`` becomes
+    ``{"type": "json_schema", ..., "strict": True}``, so the returned content
+    is guaranteed to parse AND to match the schema. Strongly preferred over
+    bare ``json_object``: it removes the whole class of failures where a model
+    emits prose, a reasoning preamble, or a JSON block with the wrong fields.
+    Strict mode requires ``additionalProperties: False`` and every property
+    listed in ``required``. Only meaningful on backends that support it — pair
+    with ``FULL_MIX_JUDGE_REQUIRE_PARAMETERS=1`` on OpenRouter so the request
+    can't be routed to a provider that would ignore it.
     """
     client, default_model = _get_client()
     effective_model = model or default_model
     max_tokens = max_tokens or _env_int("FULL_MIX_JUDGE_MAX_TOKENS", 512)
     max_retries = _env_int("FULL_MIX_JUDGE_MAX_RETRIES", 3)
+    if temperature is None:
+        temperature = _env_float("FULL_MIX_JUDGE_TEMPERATURE", 0.0)
 
     if response_format is None and os.environ.get("FULL_MIX_JUDGE_FORCE_JSON", "1") != "0":
-        response_format = {"type": "json_object"}
+        if schema is not None:
+            response_format = {
+                "type": "json_schema",
+                "json_schema": {
+                    "name": schema_name,
+                    "strict": True,
+                    "schema": schema,
+                },
+            }
+        else:
+            response_format = {"type": "json_object"}
 
     kwargs = {
         "model": effective_model,
@@ -208,6 +355,10 @@ def call_judge(
     # rewards too, so opt in explicitly (FULL_MIX_JUDGE_DISABLE_REASONING=1).
     if os.environ.get("FULL_MIX_JUDGE_DISABLE_REASONING", "0") != "0":
         extra_body["reasoning"] = {"enabled": False}
+
+    provider = _provider_block(os.environ.get("FULL_MIX_JUDGE_API_BASE"))
+    if provider:
+        extra_body["provider"] = provider
 
     if extra_body:
         kwargs["extra_body"] = extra_body
@@ -238,6 +389,12 @@ def call_judge(
             if not content.strip():
                 finish = getattr(choices[0], "finish_reason", None)
                 resp_id = getattr(resp, "id", None)
+                if finish == "length":
+                    raise JudgeReasoningOverrun(
+                        f"judge spent its entire {max_tokens}-token budget "
+                        f"reasoning and emitted no content "
+                        f"(resp.id={resp_id!r}); retrying without reasoning"
+                    )
                 raise JudgeUpstreamError(
                     f"judge returned empty content "
                     f"(resp.id={resp_id!r}, finish_reason={finish!r})"
@@ -252,15 +409,53 @@ def call_judge(
             try:
                 return parse_json_object(content, validate=validate)
             except ValueError as parse_err:
+                # Last resort before burning a retry: let the caller pull the
+                # one field it actually needs out of syntactically-broken JSON.
+                # Providers that advertise structured output do not all enforce
+                # it, and the usual breakage is an unescaped quote inside a
+                # free-text field — which leaves the enum field perfectly
+                # readable. Salvaged objects still go through `validate`.
+                if salvage is not None:
+                    try:
+                        rescued = salvage(content)
+                    except Exception:
+                        rescued = None
+                    if isinstance(rescued, dict) and (validate is None or validate(rescued)):
+                        logger.warning(
+                            "judge JSON was malformed but the verdict was "
+                            "salvageable: %r", content[:200],
+                        )
+                        return rescued
                 raise JudgeUpstreamError(
                     f"judge JSON failed parse/validate: {parse_err}; "
                     f"raw={content[:300]!r}"
                 ) from parse_err
         except Exception as e:
             last_err = e
+            # Not transient, but recoverable: the provider rejected the strict
+            # schema outright. Retry immediately with plain JSON mode.
+            if attempt < max_retries and _schema_rejected(e, kwargs):
+                kwargs["response_format"] = {"type": "json_object"}
+                logger.warning(
+                    "Judge provider rejected json_schema (attempt %d/%d): %s; "
+                    "downgrading to json_object and retrying",
+                    attempt + 1, max_retries + 1, str(e)[:200],
+                )
+                continue
             if attempt < max_retries and _is_transient(e):
-                # Exponential backoff with small jitter.
-                delay = (2 ** attempt) + random.uniform(0.0, 4)
+                # A reasoning overrun is deterministic given the same request:
+                # retrying unchanged just burns the budget again. Drop reasoning
+                # for the remaining attempts so the model has to answer directly.
+                if isinstance(e, JudgeReasoningOverrun):
+                    extra_body["reasoning"] = {"enabled": False}
+                    kwargs["extra_body"] = extra_body
+                    # No backoff: nothing upstream is overloaded, and the next
+                    # request is materially different. Sleeping here would just
+                    # stall a reward worker for no reason.
+                    delay = 0.0
+                else:
+                    # Exponential backoff with small jitter.
+                    delay = (2 ** attempt) + random.uniform(0.0, 4)
                 logger.warning(
                     "Judge call failed (attempt %d/%d): %s: %s; retrying in %.1fs",
                     attempt + 1, max_retries + 1, type(e).__name__, e, delay,

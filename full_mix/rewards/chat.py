@@ -160,6 +160,33 @@ JUDGE_USER_TEMPLATE = (
 )
 
 
+# Strict structured-output schema, paired with
+# response_format={"type": "json_schema", "strict": True, ...} in call_judge.
+# Mirrors the JSON the system prompt asks for, field-for-field. The verdict
+# enum is what makes this worth doing: the model cannot emit a label outside
+# the five we score, so _is_pairwise_verdict can no longer fail on a
+# well-formed-but-wrong answer. strict mode requires additionalProperties:
+# False and every property under `required`.
+PAIRWISE_RESPONSE_SCHEMA = {
+    "type": "object",
+    "additionalProperties": False,
+    "required": ["verdict", "reason"],
+    "properties": {
+        "verdict": {
+            "type": "string",
+            "enum": [
+                "A_much_better",
+                "A_slightly_better",
+                "tie",
+                "B_slightly_better",
+                "B_much_better",
+            ],
+        },
+        "reason": {"type": "string"},
+    },
+}
+
+
 # Verdict -> reward from A's perspective. We flip if policy is in B.
 _A_PERSPECTIVE_REWARD = {
     "A_much_better": 1.0,
@@ -182,6 +209,27 @@ def _strip_thinking(text: str) -> str:
     if "</think>" in text and "<think>" not in text:
         return text.split("</think>", 1)[1].strip()
     return _THINK_RE.sub("", text).strip()
+
+
+# Pulls the verdict out of JSON the parser rejected. Anchored on the quoted
+# key and the five literal labels, so it can only ever match a real verdict —
+# there is no way for it to invent one or to pick up a label mentioned inside
+# `reason`, which is the field that breaks the JSON in the first place (an
+# unescaped quote in the judge's own prose). `reason` is diagnostic only and
+# never reaches the reward, so losing it costs nothing.
+_VERDICT_SALVAGE_RE = re.compile(
+    r'"verdict"\s*:\s*"(A_much_better|A_slightly_better|tie'
+    r'|B_slightly_better|B_much_better)"'
+)
+
+
+def _salvage_verdict(raw: str):
+    """Recover {"verdict": ...} from malformed JSON, or None if truly absent."""
+    matches = _VERDICT_SALVAGE_RE.findall(raw or "")
+    # Ambiguous output (two different verdicts) is not salvageable — let it retry.
+    if len(set(matches)) != 1:
+        return None
+    return {"verdict": matches[0]}
 
 
 def _reward_from_verdict(verdict: str, policy_is_a: bool) -> float:
@@ -243,7 +291,13 @@ def compute_score(solution_str: str, ground_truth, extra_info=None) -> float:
         return isinstance(v, str) and v in _A_PERSPECTIVE_REWARD
 
     try:
-        obj = call_judge(messages, validate=_is_pairwise_verdict)
+        obj = call_judge(
+            messages,
+            validate=_is_pairwise_verdict,
+            schema=PAIRWISE_RESPONSE_SCHEMA,
+            schema_name="pairwise_verdict",
+            salvage=_salvage_verdict,
+        )
     except JudgeUnavailable as e:
         logger.warning("pairwise chat judge unavailable; returning 0.5 (%s)", e)
         return 0.5

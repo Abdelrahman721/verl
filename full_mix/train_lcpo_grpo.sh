@@ -38,13 +38,12 @@ fi
 export WANDB_API_KEY=${WANDB_API_KEY:-}
 
 # ---- model ----
-MODEL_PATH=${MODEL_PATH:-/data/abdelrahman/qwen-sft/full_scale/out-qwen3-4b/dual-mode-sft-tagged}
+MODEL_PATH=${MODEL_PATH:-/root/verl/model}
 
 
 # ---- data ----
-DATA_DIR=${DATA_DIR:-/data/abdelrahman/verl/data/lcpo_mix}
-VAL_DIR=${VAL_DIR:-/data/abdelrahman/verl/data/lcpo_val}
-FULL_MIX_DATA_DIR=${FULL_MIX_DATA_DIR:-/data/abdelrahman/verl/data/full_mix}
+DATA_DIR=${DATA_DIR:-/root/verl/data/lcpo_mix}
+VAL_DIR=${VAL_DIR:-/root/verl/data/lcpo_val}
 
 CHAT_VARIANT=${CHAT_VARIANT:-chat_with_baseline}
 case "$CHAT_VARIANT" in
@@ -134,14 +133,14 @@ LCPO_ALPHA_CHAT=${LCPO_ALPHA_CHAT:-0.00015}
 # ---- batching (SYNC semantics — differs from the async script) ----
 # TRAIN_BATCH_SIZE prompts are generated, scored, then trained on before the
 # next generation. TRAIN_MINI_BSZ splits that into optimizer steps:
-#   64 / 16 = 4 optimizer steps per generation, matching the async script's
-#   4 steps per parameter sync.
+#   64 / 32 = 2 optimizer steps per generation, matching the async script's
+#   2 steps per parameter sync.
 # 5996 prompts / 64 => ~93 steps per epoch.
 TRAIN_BATCH_SIZE=${TRAIN_BATCH_SIZE:-64}
-TRAIN_MINI_BSZ=${TRAIN_MINI_BSZ:-16}
+TRAIN_MINI_BSZ=${TRAIN_MINI_BSZ:-32}
 TOTAL_EPOCHS=${TOTAL_EPOCHS:-2}
 # In the sync trainer TEST_FREQ / SAVE_FREQ count TRAINING STEPS.
-TEST_FREQ=${TEST_FREQ:-10}
+TEST_FREQ=${TEST_FREQ:-20}
 SAVE_FREQ=${SAVE_FREQ:-20}
 MAX_CKPT_TO_KEEP=${MAX_CKPT_TO_KEEP:-5}
 
@@ -154,7 +153,7 @@ fi
 
 
 # ---- rollout / validation dump dirs ----
-DUMP_ROOT=${DUMP_ROOT:-/data/abdelrahman/verl/dumps/lcpo_budget_sync}
+DUMP_ROOT=${DUMP_ROOT:-/root/verl/dumps/lcpo_budget_sync}
 ROLLOUT_DATA_DIR=${ROLLOUT_DATA_DIR:-${DUMP_ROOT}/rollouts}
 VALIDATION_DATA_DIR=${VALIDATION_DATA_DIR:-${DUMP_ROOT}/val}
 
@@ -200,13 +199,71 @@ REWARD_NUM_WORKERS=${REWARD_NUM_WORKERS:-16}
 # ---- judge (the chat slice is scored by an LLM judge) ----
 export FULL_MIX_JUDGE_API_BASE=${FULL_MIX_JUDGE_API_BASE:-https://openrouter.ai/api/v1}
 export FULL_MIX_JUDGE_API_KEY=${FULL_MIX_JUDGE_API_KEY:-}
-export FULL_MIX_JUDGE_MODEL=${FULL_MIX_JUDGE_MODEL:-deepseek/deepseek-v3.2}
+export FULL_MIX_JUDGE_MODEL=${FULL_MIX_JUDGE_MODEL:-deepseek/deepseek-v4-flash-0731}
 export FULL_MIX_JUDGE_TIMEOUT=${FULL_MIX_JUDGE_TIMEOUT:-240}
 export FULL_MIX_JUDGE_MAX_RETRIES=${FULL_MIX_JUDGE_MAX_RETRIES:-3}
-export FULL_MIX_JUDGE_MAX_TOKENS=${FULL_MIX_JUDGE_MAX_TOKENS:-32768}
+# 8K. A verdict + a 25-word reason is ~150 tokens and healthy providers spend
+# ~220; the cap only exists to stop a misbehaving endpoint. At the old 32768 a
+# degenerate provider ran to 13k tokens before halting — paid for in full, and
+# blocking a reward worker for minutes. 8K still leaves room for reasoning.
+export FULL_MIX_JUDGE_MAX_TOKENS=${FULL_MIX_JUDGE_MAX_TOKENS:-16384}
 export FULL_MIX_JUDGE_FORCE_JSON=${FULL_MIX_JUDGE_FORCE_JSON:-1}
 export FULL_MIX_JUDGE_DISABLE_THINKING=${FULL_MIX_JUDGE_DISABLE_THINKING:-0}
-export FULL_MIX_JUDGE_CONCURRENCY=${FULL_MIX_JUDGE_CONCURRENCY:-32}
+# Reasoning stays ON. It is the judge's accuracy/latency dial, and turning it
+# off changes the reward the policy is trained against — set explicitly rather
+# than inherited from the client default so the choice is visible in the run.
+export FULL_MIX_JUDGE_DISABLE_REASONING=${FULL_MIX_JUDGE_DISABLE_REASONING:-0}
+# Pin the judge to a named set of OpenRouter providers. The model is served by
+# 28 independently-operated deployments at quantizations from fp4 to bf16; they
+# are not interchangeable. Left unpinned, 80 sampled calls hit 8 providers and
+# every JSON failure came from one of them (Morph, bf16) emitting repetition
+# loops of 4k-13k tokens. Pinning is what stopped that.
+#
+# ORDER is the priority list (ONLY is just a permission set — within it
+# OpenRouter load-balances, which let the slowest member set the median
+# latency: 8.0s balanced vs 1.5s ordered). The first three enforce structured
+# output; digitalocean and baseten are overflow capacity for rate-limit spikes
+# at CONCURRENCY=32, which is the failure this pool is sized against.
+#
+# novita/fp8 is in the pool but needs a client-side workaround, which
+# judge_client._schema_rejected supplies: it advertises response_format (that
+# flag only ever promises {"type":"json_object"}) WITHOUT structured_outputs
+# (the flag that actually gates json_schema). OpenRouter therefore routes to
+# it and novita hard-400s the schema — INVALID_REQUEST_BODY, not a transient,
+# so untreated it would fail straight through to a neutral 0.5. call_judge now
+# downgrades to json_object and retries: 4/4 recovered. Otherwise a good
+# member — fp8, 100% 30m uptime, 89 tok/s.
+#
+# Excluded: fireworks — its status recovered (-2 -> 0, 92.9% -> 97.7% uptime)
+# but every request still 429s with limit_source=upstream_provider_shared_pool,
+# is_byok=false: Fireworks' shared capacity for this model is saturated, and
+# even a single 16-token call fails (18/18 concurrent, 5/5 sequential). Attach
+# a Fireworks key at openrouter.ai/settings/integrations to bill against your
+# own limits instead, then it can go back in.
+# Excluded: morph — advertises structured outputs + bf16 + status 0, yet
+# produced the repetition loops above. Flags do not predict output quality.
+#
+# Caveat worth knowing: together does not reason (~41 completion tokens vs
+# ~142 baidu / ~181 deepinfra on identical inputs) and scores ambiguous pairs
+# ~0.13 higher as a result, so calls that spill across the pool are judged
+# slightly differently. Set DISABLE_REASONING=1 to make them behave alike, at
+# the cost of changing the reward the policy trains against.
+export FULL_MIX_JUDGE_PROVIDER_ONLY=${FULL_MIX_JUDGE_PROVIDER_ONLY:-baidu,deepinfra,together,digitalocean,baseten,novita}
+export FULL_MIX_JUDGE_PROVIDER_ORDER=${FULL_MIX_JUDGE_PROVIDER_ORDER:-baidu,deepinfra,together,digitalocean,baseten,novita}
+# OFF, deliberately. With it on, OpenRouter routes only to providers that
+# support every parameter we send, which excludes digitalocean and baseten
+# (neither implements response_format) — pinned to either, the request 404s.
+# Off, OpenRouter silently strips response_format for them and the judge falls
+# back to following the prompt alone. Measured 2026-08-19 at 12 calls each,
+# unconstrained: digitalocean 12/12 valid JSON, baseten 5/5 valid (7 rate-
+# limited). The model complies without the constraint; _salvage_verdict in
+# rewards/chat.py is the net underneath for when it does not.
+export FULL_MIX_JUDGE_REQUIRE_PARAMETERS=${FULL_MIX_JUDGE_REQUIRE_PARAMETERS:-0}
+# Non-zero so a retry can actually differ from the call that failed. At 0.0 a
+# pinned single provider is deterministic: a malformed verdict would be
+# regenerated byte-identically on all 4 attempts. Costs some reward variance.
+export FULL_MIX_JUDGE_TEMPERATURE=${FULL_MIX_JUDGE_TEMPERATURE:-0.6}
+export FULL_MIX_JUDGE_CONCURRENCY=${FULL_MIX_JUDGE_CONCURRENCY:-16}
 
 if [[ -z "${FULL_MIX_JUDGE_API_KEY}" ]]; then
   echo "[preflight] FULL_MIX_JUDGE_API_KEY is empty; the chat slice would score a constant 0.5." >&2
@@ -331,9 +388,7 @@ python3 -m verl.trainer.main_ppo \
   +reward.reward_kwargs.lcpo.stage="${LCPO_STAGE}" \
   +reward.reward_kwargs.lcpo.alpha="${LCPO_ALPHA}" \
   +reward.reward_kwargs.lcpo.delta="${LCPO_DELTA}" \
-  +reward.reward_kwargs.lcpo.alpha_by_source.'local/dolci-math-7b'="${LCPO_ALPHA_MATH}" \
-  +reward.reward_kwargs.lcpo.alpha_by_source.'local/dolci-ifeval-32b'="${LCPO_ALPHA_IFEVAL}" \
-  +reward.reward_kwargs.lcpo.alpha_by_source.'local/dolci-chat-32b'="${LCPO_ALPHA_CHAT}" \
+  "+reward.reward_kwargs.lcpo.alpha_by_source={local/dolci-math-7b:${LCPO_ALPHA_MATH},local/dolci-ifeval-32b:${LCPO_ALPHA_IFEVAL},local/dolci-chat-32b:${LCPO_ALPHA_CHAT}}" \
   +reward.reward_kwargs.overlong_buffer_cfg.enable="${ENABLE_OVERLONG_BUFFER}" \
   +reward.reward_kwargs.overlong_buffer_cfg.len="${OVERLONG_BUFFER_LEN}" \
   +reward.reward_kwargs.overlong_buffer_cfg.penalty_factor="${OVERLONG_PENALTY_FACTOR}" \
