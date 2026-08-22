@@ -59,12 +59,24 @@ EXTRA_KEYS = (
     "abs_len_err", "rel_len_err", "len_mult", "len_penalty",
     "is_wellformed", "is_nothink_mode", "nothink_format_ok",
     "chat_exact_half", "truncated", "task_score",
+    # Collapse instrumentation. `think_collapsed` is the canary: a fixed
+    # threshold, independent of the reward gate, so it keeps reading true even
+    # if the gate is retuned. In the stage-a run of 2026-08-19 this share went
+    # 3% -> 38% -> 90% across steps 15-19 and nothing surfaced it.
+    "min_think_ok", "think_collapsed",
 )
+
+# Absolute think-token count below which a budgeted response is "collapsed".
+# Reporting only — the reward gate is lcpo.min_think_tokens.
+THINK_COLLAPSE_TOKENS = 32
 
 
 def _defaults() -> dict:
-    return {k: -1.0 if k in ("think_budget", "abs_len_err", "rel_len_err") else 0.0
-            for k in EXTRA_KEYS}
+    out = {k: -1.0 if k in ("think_budget", "abs_len_err", "rel_len_err") else 0.0
+           for k in EXTRA_KEYS}
+    # Rows outside budget mode are never gated on think length.
+    out["min_think_ok"] = 1.0
+    return out
 
 
 def split_think(valid_ids) -> tuple[int, int, bool, list]:
@@ -109,6 +121,22 @@ class LCPORewardManager(RewardManagerBase):
         # ifeval and chat by 1.5-3x. Calibrated at gate G2.
         self.alpha_by_source = {str(k): float(v) for k, v in (lcpo_cfg.get("alpha_by_source", {}) or {}).items()}
         assert self.stage in ("a", "b"), f"lcpo.stage must be 'a' or 'b', got {self.stage!r}"
+
+        # Which length the budget governs: "total" (think + answer) or "think".
+        # "think" leaves the answer unconstrained, which makes relocating the
+        # reasoning the cheapest way to comply — see lcpo.py's docstring.
+        self.length_target = str(lcpo_cfg.get("length_target", lcpo.DEFAULT_LENGTH_TARGET)).lower()
+        assert self.length_target in (lcpo.LENGTH_TARGET_TOTAL, lcpo.LENGTH_TARGET_THINK), (
+            f"lcpo.length_target must be 'total' or 'think', got {self.length_target!r}"
+        )
+        self.min_think_floor = int(lcpo_cfg.get("min_think_floor", lcpo.DEFAULT_MIN_THINK_FLOOR))
+        self.min_think_frac = float(lcpo_cfg.get("min_think_frac", lcpo.DEFAULT_MIN_THINK_FRAC))
+        print(
+            f"[LCPORewardManager] stage={self.stage} length_target={self.length_target} "
+            f"min_think=max({self.min_think_floor}, {self.min_think_frac}*budget) "
+            f"alpha={self.alpha_default} alpha_by_source={self.alpha_by_source}",
+            flush=True,
+        )
 
     def alpha_for(self, data_source: str) -> float:
         return self.alpha_by_source.get(str(data_source), self.alpha_default)
@@ -178,8 +206,10 @@ class LCPORewardManager(RewardManagerBase):
 
         out = lcpo.compute_reward(
             mode=mode, stage=self.stage, task_score=task_score, wellformed=wellformed,
-            n_think=n_think, budget=budget, nothink_ok=nothink_ok,
-            alpha=self.alpha_for(data_source), delta=self.delta,
+            n_think=n_think, n_total=int(valid_response_length), budget=budget,
+            nothink_ok=nothink_ok, alpha=self.alpha_for(data_source), delta=self.delta,
+            length_target=self.length_target,
+            min_think_floor=self.min_think_floor, min_think_frac=self.min_think_frac,
         )
 
         extra["score"] = float(out["reward"])
@@ -201,8 +231,14 @@ class LCPORewardManager(RewardManagerBase):
         # We are not changing the judge, so watch this share instead.
         extra["chat_exact_half"] = 1.0 if (data_source in CHAT_SOURCES and task_score == 0.5) else 0.0
 
+        extra["min_think_ok"] = float(out["min_think_ok"])
+
         if mode == MODE_BUDGET and budget > 0:
-            extra["abs_len_err"] = float(abs(budget - n_think))
-            extra["rel_len_err"] = float(abs(budget - n_think) / budget)
+            # Measured against the length the reward actually controls, so the
+            # error curve and the penalty can never disagree.
+            n_len = lcpo.controlled_length(n_think, int(valid_response_length), self.length_target)
+            extra["abs_len_err"] = float(abs(budget - n_len))
+            extra["rel_len_err"] = float(abs(budget - n_len) / budget)
+            extra["think_collapsed"] = 1.0 if n_think < THINK_COLLAPSE_TOKENS else 0.0
 
         return {"reward_score": float(out["reward"]), "reward_extra_info": extra}

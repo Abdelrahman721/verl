@@ -53,12 +53,35 @@ UID_DATASET_STRIDE = 10_000_000
 
 _SHARD_RE = re.compile(r"^(?P<base>.+)#shard(?P<shard>\d+)$")
 
+# Validation-variant suffix, e.g. "openai/gsm8k@b00256" or "google/IFEval@free".
+# Purely a reporting dimension: verl groups val metrics by the data_source
+# STRING, so this is what turns one pooled `val-core/openai/gsm8k/reward` into
+# one series per budget rung. Stripped everywhere else, so scoring, routing and
+# int encoding never see it. `@` is safe as a delimiter — no base contains one.
+_VARIANT_RE = re.compile(r"^(?P<base>[^@]+)@(?P<variant>[A-Za-z0-9_]+)$")
+
+
+def split_variant(value: str) -> tuple[str, str | None]:
+    """Split off a trailing ``@variant`` tag. Returns (rest, variant_or_None)."""
+    m = _VARIANT_RE.match(value)
+    if m is None:
+        return value, None
+    return m.group("base"), m.group("variant")
+
+
+def variant_of(value: str) -> str | None:
+    """The ``@variant`` tag on a data_source, or None."""
+    return split_variant(value)[1]
+
 
 def split_data_source(value: str) -> tuple[str, int | None]:
     """Split a parquet ``data_source`` string into (base, shard_id_or_None).
 
     ``shard_id_or_None`` is ``None`` for un-suffixed strings (the originals).
+    Any ``@variant`` tag is stripped first, so every existing caller — reward
+    routing, int encoding, uid construction — is unaffected by it.
     """
+    value, _variant = split_variant(value)
     m = _SHARD_RE.match(value)
     if m is None:
         return value, None

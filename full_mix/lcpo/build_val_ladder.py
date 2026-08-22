@@ -11,8 +11,10 @@ One parquet per variant, with the eval sets concatenated inside it:
     val_free.parquet          (bare /think, no budget)
     val_nothink.parquet       (/no_think)
 
-Per-budget curves come from the reward manager's `think_budget` metric key, not
-from the filenames, so combining the eval sets in one file costs nothing.
+Each row's data_source is tagged `@b00256` / `@free` / `@nothink` so verl emits
+one validation series PER RUNG instead of pooling all eight into a single
+number. The tag is a reporting dimension only — encoding.split_data_source
+strips it before any routing or scoring decision.
 
 The rungs bracket the training range [200, 6000] rather than extending past it.
 6000 is trained, so the top of the ladder is interpolation; that is deliberate,
@@ -61,11 +63,30 @@ EVAL_FILES = [
     "math500_eval.parquet",
 ]
 
+def variant_tag(mode: str, budget: int) -> str:
+    """Reporting tag appended to data_source as ``@tag``.
+
+    verl groups validation metrics by the data_source STRING, so without this
+    all eight variants pool into one number per eval set and the score-vs-budget
+    curve — the entire point of the ladder — cannot be plotted. The 2026-08-19
+    run showed the symptom clearly: `think_budget/mean@1` sat at a constant
+    1729.75, which is the mean of the six rungs plus the two -1 sentinels, a
+    budget no prompt actually carries.
+
+    The tag is stripped by encoding.split_data_source, so reward routing, int
+    encoding and uid construction never see it.
+    """
+    if mode == MODE_BUDGET:
+        return f"b{int(budget):05d}"
+    return str(mode)
+
+
 def render(rows: list[dict], mode: str, budget: int) -> list[dict]:
+    tag = variant_tag(mode, budget)
     return [
         {
             "prompt": apply_to_messages(r["prompt"], mode, budget),
-            "data_source": r["data_source"],
+            "data_source": f"{r['data_source']}@{tag}",
             "ability": r["ability"],
             "reward_model": r["reward_model"],
             "extra_info": homogenize_extra_info(r["extra_info"]),

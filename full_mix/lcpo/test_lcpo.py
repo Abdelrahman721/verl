@@ -24,10 +24,12 @@ from full_mix.rewards import lcpo  # noqa: E402
 ALPHA = lcpo.DEFAULT_ALPHA
 
 
-def _r(mode, stage, score, wellformed, n_think, budget, nothink_ok=True):
+def _r(mode, stage, score, wellformed, n_think, budget, nothink_ok=True,
+       n_answer=0, length_target=lcpo.DEFAULT_LENGTH_TARGET):
     return lcpo.compute_reward(
         mode=mode, stage=stage, task_score=score, wellformed=wellformed,
-        n_think=n_think, budget=budget, nothink_ok=nothink_ok, alpha=ALPHA,
+        n_think=n_think, n_total=n_think + n_answer, budget=budget,
+        nothink_ok=nothink_ok, alpha=ALPHA, length_target=length_target,
     )["reward"]
 
 
@@ -92,16 +94,54 @@ def test_stage_b_is_monotone_in_budget():
 
 
 def test_reasoning_in_the_answer_is_not_rewarded_by_the_length_term():
-    """Leaking is only detectable via n_answer; the reward must not encourage it.
+    """Relocating reasoning into the answer must not pay.
 
-    We have no answer penalty right now (deliberately), so this pins the current
-    contract: moving reasoning into the answer DOES improve the stage-b
-    multiplier. That is exactly why n_answer is logged per budget bucket, and
-    this test is the reminder to add a penalty if that metric starts moving.
+    This inverts the contract this test used to pin. Under length_target="think"
+    a 2000-token thinker was beaten by a 10-token thinker that moved the same
+    2000 tokens into its answer, and the stage-a run of 2026-08-19 found that
+    exploit within ~4 steps: budgeted math went to `<think>\n\n</think>` with
+    n_think 8045 -> 3 while n_answer grew 399 -> 1376.
     """
-    honest = _r("budget", "b", 1.0, True, 2000, 800)
-    leaked = _r("budget", "b", 1.0, True, 10, 800)
-    assert leaked > honest, "documented gap: leaking currently scores better"
+    # Same total work, split differently. Under "total" they are equivalent...
+    honest = _r("budget", "b", 1.0, True, 2000, 800, n_answer=100)
+    leaked = _r("budget", "b", 1.0, True, 100, 800, n_answer=2000)
+    assert leaked <= honest, "relocating reasoning into the answer must not score better"
+
+    # ...and the old target still exhibits the exploit, which is why it is not
+    # the default. Keeping it covered documents exactly what "think" costs you.
+    honest_think = _r("budget", "b", 1.0, True, 2000, 800, n_answer=100,
+                      length_target="think")
+    leaked_think = _r("budget", "b", 1.0, True, 100, 800, n_answer=2000,
+                      length_target="think")
+    assert leaked_think > honest_think, "length_target='think' is the exploitable one"
+
+
+def test_empty_think_block_is_gated_in_budget_mode():
+    """`<think></think>` + a long answer must not out-score a real attempt."""
+    r = lcpo.compute_reward(
+        mode="budget", stage="a", task_score=1.0, wellformed=True,
+        n_think=3, n_total=2000, budget=2000, alpha=ALPHA,
+    )
+    assert r["min_think_ok"] == 0.0
+    assert r["task_score_used"] == 0.0, "a skipped think block scores as no attempt"
+
+    real = lcpo.compute_reward(
+        mode="budget", stage="a", task_score=1.0, wellformed=True,
+        n_think=1900, n_total=2000, budget=2000, alpha=ALPHA,
+    )
+    assert real["min_think_ok"] == 1.0
+    assert real["reward"] > r["reward"]
+
+
+def test_min_think_floor_scales_with_budget():
+    assert lcpo.min_think_tokens(100) == 32      # floor dominates at small budgets
+    assert lcpo.min_think_tokens(6000) == 600    # fraction dominates at large ones
+
+
+def test_free_and_nothink_are_not_gated_on_think_length():
+    """The floor is a budget-mode rule only; /no_think must stay legal."""
+    assert _r("nothink", "a", 1.0, True, 0, -1) == 1.0
+    assert _r("free", "a", 1.0, True, 0, -1) == 1.0
 
 
 def test_prompt_round_trip():

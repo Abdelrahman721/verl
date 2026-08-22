@@ -37,6 +37,11 @@ fi
 
 export WANDB_API_KEY=${WANDB_API_KEY:-}
 
+# Repo root on PYTHONPATH so `import full_mix...` resolves in EVERY Ray process,
+# not just the launcher. Required by the worker_process_setup_hook below.
+_REPO_ROOT_DIR="$(dirname "$_FM_DIR")"
+export PYTHONPATH="${_REPO_ROOT_DIR}${PYTHONPATH:+:${PYTHONPATH}}"
+
 # ---- model ----
 MODEL_PATH=${MODEL_PATH:-/root/verl/model}
 
@@ -115,17 +120,41 @@ OVERLONG_PENALTY_FACTOR=${OVERLONG_PENALTY_FACTOR:-1.0}
 # stage a = LCPO-Exact, stage b = LCPO-Max (see the header).
 LCPO_STAGE=${LCPO_STAGE:-a}
 LCPO_DELTA=${LCPO_DELTA:-0.5}
+# Which length the budget governs. "total" = think + answer, "think" = the think
+# span only. MUST stay "total": under "think" the answer body is unconstrained,
+# so the cheapest way to satisfy a budget is to relocate the reasoning rather
+# than compress it. The 2026-08-19 stage-a run found that exploit by step ~19 —
+# budgeted math settled on `<think>\n\n</think>` (n_think 8045 -> 3) while
+# n_answer grew 399 -> 1376 and the task score recovered as it did.
+LCPO_LENGTH_TARGET=${LCPO_LENGTH_TARGET:-total}
+# A budgeted response spending fewer than max(floor, frac*budget) think tokens
+# is scored as no attempt. Without this, the empty think block above is a
+# reachable fixed point that group-relative advantage cannot escape: once every
+# sample in a group emits it, the length term has zero within-group variance and
+# cancels out of the advantage entirely (measured: 29% of math groups at step
+# 170 had exactly zero score variance).
+LCPO_MIN_THINK_FLOOR=${LCPO_MIN_THINK_FLOOR:-32}
+LCPO_MIN_THINK_FRAC=${LCPO_MIN_THINK_FRAC:-0.10}
+
 # alpha is a reward-per-token exchange rate, so the right value depends on how
 # much the task score varies within a group. The paper's 3e-4 is calibrated
 # against a binary math reward spreading 0.30-0.50; ifeval spreads only
 # 0.10-0.20 and chat 0.15-0.25, so one global alpha would let the length term
 # outweigh the task term on those two by 1.5-3x.
 #
-# Gate G2: run ~50 stage-a steps, compare critic/lcpo/mode_budget/abs_len_err
-# against each source's task-score spread, then set these so the length term is
-# about 60% of that spread. The two non-math values are provisional scalings.
+# What matters for learning is each term's WITHIN-GROUP spread, not its size:
+# NORM_ADV_BY_STD=False, so advantage is (score - group_mean) and any term that
+# is constant across a group cancels. Measured on 2026-08-19 at step 5, math:
+# sd(len_penalty)=0.545 vs sd(task)=0.254 — a ratio of 2.15, i.e. length
+# outweighed correctness 2:1 (ifeval and chat sat at a healthy 0.31-0.50).
+# 3e-4 -> 5e-5 puts math's ratio near 0.35, in line with the other two.
+#
+# Gate G2 still owes a proper calibration: run ~50 stage-a steps, compare
+# critic/lcpo/mode_budget/abs_len_err against each source's task-score spread,
+# then set these so the length term is ~60% of that spread. Note the error being
+# measured is now against TOTAL length, so all three want re-deriving.
 LCPO_ALPHA=${LCPO_ALPHA:-0.0003}
-LCPO_ALPHA_MATH=${LCPO_ALPHA_MATH:-0.0003}
+LCPO_ALPHA_MATH=${LCPO_ALPHA_MATH:-0.00005}
 LCPO_ALPHA_IFEVAL=${LCPO_ALPHA_IFEVAL:-0.0001}
 LCPO_ALPHA_CHAT=${LCPO_ALPHA_CHAT:-0.00015}
 
@@ -308,7 +337,18 @@ print("[preflight] chat template is open-ended for all three modes: OK")
 PYEOF
 
 
+# worker_process_setup_hook runs full_mix.per_source_metrics.install in every
+# Ray worker, which is the only way the per-source and LCPO curves reach wandb.
+# compute_data_metrics executes inside the TaskRunner ACTOR (main_ppo.run_ppo
+# does ray.remote(TaskRunner)), while the reward module that used to import the
+# patch loads in the RewardLoopWorkers — a different process entirely. That
+# mismatch is why the 2026-08-19 run logged `rebound 0 call site(s)` and no
+# critic/lcpo/* or critic/per_source/* series at all, so a math-slice collapse
+# that was visible in the per-slice numbers by step 20 went unseen until 170.
+# Confirm on startup: look for "[per_source_metrics] installed in pid=..." with
+# trainer_in_process=True.
 python3 -m verl.trainer.main_ppo \
+  "+ray_kwargs.ray_init.runtime_env.worker_process_setup_hook=full_mix.per_source_metrics.install" \
   algorithm.adv_estimator="${ADV_ESTIMATOR}" \
   algorithm.norm_adv_by_std_in_grpo="${NORM_ADV_BY_STD}" \
   algorithm.use_kl_in_reward="${USE_KL_IN_REWARD}" \
@@ -389,6 +429,9 @@ python3 -m verl.trainer.main_ppo \
   +reward.reward_kwargs.lcpo.alpha="${LCPO_ALPHA}" \
   +reward.reward_kwargs.lcpo.delta="${LCPO_DELTA}" \
   "+reward.reward_kwargs.lcpo.alpha_by_source={local/dolci-math-7b:${LCPO_ALPHA_MATH},local/dolci-ifeval-32b:${LCPO_ALPHA_IFEVAL},local/dolci-chat-32b:${LCPO_ALPHA_CHAT}}" \
+  +reward.reward_kwargs.lcpo.length_target="${LCPO_LENGTH_TARGET}" \
+  +reward.reward_kwargs.lcpo.min_think_floor="${LCPO_MIN_THINK_FLOOR}" \
+  +reward.reward_kwargs.lcpo.min_think_frac="${LCPO_MIN_THINK_FRAC}" \
   +reward.reward_kwargs.overlong_buffer_cfg.enable="${ENABLE_OVERLONG_BUFFER}" \
   +reward.reward_kwargs.overlong_buffer_cfg.len="${OVERLONG_BUFFER_LEN}" \
   +reward.reward_kwargs.overlong_buffer_cfg.penalty_factor="${OVERLONG_PENALTY_FACTOR}" \

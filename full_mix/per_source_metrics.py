@@ -28,14 +28,31 @@ affect those already-bound references, so the metric never changes. We instead
 rebind every live reference across `sys.modules`, so the patch works regardless
 of import order.
 
-Usage: ensure this module is imported once before training starts. It is
-imported from `full_mix/rewards/compute_score.py` (the custom reward module,
-loaded during trainer setup, after the trainer modules are already imported).
-The patch is idempotent.
+Usage: this module must be imported IN THE PROCESS THAT COMPUTES METRICS.
+
+That is not the process it looks like. `compute_data_metrics` runs inside the
+`TaskRunner` Ray actor (main_ppo.run_ppo creates it with `ray.remote(TaskRunner)`),
+whereas the import from `full_mix/rewards/compute_score.py` happens in the
+RewardLoopWorker processes that score rollouts. Importing there patches those
+workers and nothing else, so every curve below silently goes missing while the
+run looks healthy. That is exactly what happened to the stage-a run of
+2026-08-19: `rebound 0 call site(s)` in the reward workers, no per-source or
+LCPO curves in wandb, and a math-slice collapse that took 170 steps to notice
+instead of 20.
+
+The training script therefore also passes this module's `install` as a Ray
+worker setup hook, which runs in every Ray worker including the TaskRunner:
+
+    +ray_kwargs.ray_init.runtime_env.worker_process_setup_hook=full_mix.per_source_metrics.install
+
+That requires the repo root on PYTHONPATH in the Ray workers; the training
+script exports it. The patch is idempotent, so importing it several ways is
+harmless.
 """
 
 from __future__ import annotations
 
+import os
 import sys
 
 import numpy as np
@@ -226,7 +243,28 @@ def install() -> int:
         if ref is _orig_compute_data_metrics:
             setattr(mod, "compute_data_metrics", wrapped)
             patched += 1
-    print(f"[per_source_metrics] installed, rebound {patched} call site(s)", flush=True)
+
+    # Be explicit about which of the two mechanisms actually took, because
+    # "rebound 0 call site(s)" is NOT a failure on its own — step 1 above still
+    # covers every module that imports metric_utils later. The failure mode we
+    # actually had was subtler: the right process never imported this module.
+    # `trainer_seen` answers that: it is true only where a trainer is loaded.
+    trainer_seen = any(
+        "trainer" in name and getattr(mod, "compute_data_metrics", None) is wrapped
+        for name, mod in list(sys.modules.items()) if mod is not None
+    )
+    print(
+        f"[per_source_metrics] installed in pid={os.getpid()}: "
+        f"canonical=patched, late-bound sites={patched}, trainer_in_process={trainer_seen}",
+        flush=True,
+    )
+    if not trainer_seen:
+        print(
+            "[per_source_metrics] NOTE: no trainer module in this process — if this "
+            "is the only place the module is imported, per-source and LCPO curves "
+            "will NOT appear in wandb. See this module's docstring.",
+            flush=True,
+        )
     return patched
 
 
