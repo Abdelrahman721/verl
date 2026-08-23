@@ -49,11 +49,15 @@ except ImportError:
     AutomodelEngineWithLMHead = None
 
 # Mindspeed must be imported before Megatron to ensure the related monkey patches take effect as expected
+# These two probe availability rather than declare a dependency, so they must not be able to abort the
+# import of this module. `except Exception` rather than `except ImportError`: they pull in megatron.core ->
+# transformer_engine, which probes the local device while it loads and raises AssertionError("Invalid device
+# id") on a process Ray has given no GPU (e.g. the CPU-only TaskRunner actor).
 try:
     from .mindspeed import MindspeedEngineWithLMHead, MindSpeedLLMEngineWithLMHead
 
     __all__ += ["MindspeedEngineWithLMHead", "MindSpeedLLMEngineWithLMHead"]
-except ImportError:
+except Exception:
     MindspeedEngineWithLMHead = None
     MindSpeedLLMEngineWithLMHead = None
 
@@ -61,6 +65,6 @@ try:
     from .megatron import MegatronEngine, MegatronEngineWithLMHead
 
     __all__ += ["MegatronEngine", "MegatronEngineWithLMHead"]
-except ImportError:
+except Exception:
     MegatronEngine = None
     MegatronEngineWithLMHead = None

@@ -337,18 +337,20 @@ print("[preflight] chat template is open-ended for all three modes: OK")
 PYEOF
 
 
-# worker_process_setup_hook runs full_mix.per_source_metrics.install in every
-# Ray worker, which is the only way the per-source and LCPO curves reach wandb.
-# compute_data_metrics executes inside the TaskRunner ACTOR (main_ppo.run_ppo
-# does ray.remote(TaskRunner)), while the reward module that used to import the
-# patch loads in the RewardLoopWorkers — a different process entirely. That
-# mismatch is why the 2026-08-19 run logged `rebound 0 call site(s)` and no
-# critic/lcpo/* or critic/per_source/* series at all, so a math-slice collapse
-# that was visible in the per-slice numbers by step 20 went unseen until 170.
+# full_mix.main_ppo is verl.trainer.main_ppo with full_mix.per_source_metrics.install
+# run inside the TaskRunner actor; every hydra override below is unchanged.
+# compute_data_metrics executes inside that ACTOR (main_ppo.run_ppo does
+# ray.remote(TaskRunner)), while the reward module that used to import the patch
+# loads in the RewardLoopWorkers — a different process entirely. That mismatch is
+# why the 2026-08-19 run logged `rebound 0 call site(s)` and no critic/lcpo/* or
+# critic/per_source/* series at all, so a math-slice collapse that was visible in
+# the per-slice numbers by step 20 went unseen until 170.
+# Do NOT go back to worker_process_setup_hook for this: it runs in every worker
+# BEFORE Ray assigns GPUs, which freezes torch's device list and put all 8 ranks
+# on physical GPU 0 ("Duplicate GPU detected"). See full_mix/main_ppo.py.
 # Confirm on startup: look for "[per_source_metrics] installed in pid=..." with
 # trainer_in_process=True.
-python3 -m verl.trainer.main_ppo \
-  "+ray_kwargs.ray_init.runtime_env.worker_process_setup_hook=full_mix.per_source_metrics.install" \
+python3 -m full_mix.main_ppo \
   algorithm.adv_estimator="${ADV_ESTIMATOR}" \
   algorithm.norm_adv_by_std_in_grpo="${NORM_ADV_BY_STD}" \
   algorithm.use_kl_in_reward="${USE_KL_IN_REWARD}" \

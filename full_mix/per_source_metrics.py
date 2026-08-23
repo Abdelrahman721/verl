@@ -40,14 +40,23 @@ run looks healthy. That is exactly what happened to the stage-a run of
 LCPO curves in wandb, and a math-slice collapse that took 170 steps to notice
 instead of 20.
 
-The training script therefore also passes this module's `install` as a Ray
-worker setup hook, which runs in every Ray worker including the TaskRunner:
+The training script therefore launches `full_mix.main_ppo` instead of
+`verl.trainer.main_ppo`. That entry point subclasses verl's TaskRunner and calls
+`install()` at the top of `run`, so the patch lands in the actor that computes
+the metrics. It requires the repo root on PYTHONPATH in the Ray workers; the
+training script exports it. The patch is idempotent, so importing it several ways
+is harmless.
 
-    +ray_kwargs.ray_init.runtime_env.worker_process_setup_hook=full_mix.per_source_metrics.install
-
-That requires the repo root on PYTHONPATH in the Ray workers; the training
-script exports it. The patch is idempotent, so importing it several ways is
-harmless.
+DO NOT install this as a Ray `worker_process_setup_hook`. It reaches the
+TaskRunner that way too, but Ray runs setup hooks in every worker BEFORE
+assigning that worker its GPUs. Importing this module imports verl, whose
+`utils/device.py` calls `torch.cuda.is_available()` at import time, and that
+first CUDA call freezes the process's device list to every GPU on the box. The
+per-actor CUDA_VISIBLE_DEVICES Ray sets afterwards is then ignored, which on
+2026-08-23 killed the TaskRunner with AssertionError("Invalid device id") from
+transformer_engine's import-time device probe, and then put all 8 ranks on
+physical GPU 0 ("Duplicate GPU detected : rank 3 and rank 0"). See
+full_mix/main_ppo.py for the full write-up.
 """
 
 from __future__ import annotations
