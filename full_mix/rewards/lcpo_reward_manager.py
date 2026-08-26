@@ -115,10 +115,13 @@ class LCPORewardManager(RewardManagerBase):
         self.delta = float(lcpo_cfg.get("delta", lcpo.DEFAULT_DELTA))
         self.alpha_default = float(lcpo_cfg.get("alpha", lcpo.DEFAULT_ALPHA))
         # Per-source alpha. alpha is a reward-per-token exchange rate, and the
-        # right value depends on how much the task score varies within a group:
-        # math spreads 0.30-0.50, ifeval only 0.10-0.20, chat 0.15-0.25. One
-        # global alpha would let the length term dominate the task term on
-        # ifeval and chat by 1.5-3x. Calibrated at gate G2.
+        # right value depends on how much the task score varies within a group.
+        # Measured over steps 70-89 of the 2026-08-23 stage-a run, within-group
+        # sd(task_score) is 0.193 ifeval / 0.251 chat / 0.222 math, and the
+        # error each alpha multiplies has its own spread (sd|b-n| 643/550/1084),
+        # so one global alpha would put the three sources at very different
+        # length-vs-correctness ratios. Calibrated at gate G2 to 0.8 of each
+        # source's task spread; see the derivation in train_lcpo_grpo.sh.
         self.alpha_by_source = {str(k): float(v) for k, v in (lcpo_cfg.get("alpha_by_source", {}) or {}).items()}
         assert self.stage in ("a", "b"), f"lcpo.stage must be 'a' or 'b', got {self.stage!r}"
 

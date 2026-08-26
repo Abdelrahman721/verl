@@ -43,12 +43,12 @@ _REPO_ROOT_DIR="$(dirname "$_FM_DIR")"
 export PYTHONPATH="${_REPO_ROOT_DIR}${PYTHONPATH:+:${PYTHONPATH}}"
 
 # ---- model ----
-MODEL_PATH=${MODEL_PATH:-/root/verl/model}
+MODEL_PATH=${MODEL_PATH:-/workspace/verl/model}
 
 
 # ---- data ----
-DATA_DIR=${DATA_DIR:-/root/verl/data/lcpo_mix}
-VAL_DIR=${VAL_DIR:-/root/verl/data/lcpo_val}
+DATA_DIR=${DATA_DIR:-/workspace/verl/data/lcpo_mix}
+VAL_DIR=${VAL_DIR:-/workspace/verl/data/lcpo_val}
 
 CHAT_VARIANT=${CHAT_VARIANT:-chat_with_baseline}
 case "$CHAT_VARIANT" in
@@ -70,7 +70,7 @@ VAL_FILES=${VAL_FILES:-"[${VAL_DIR}/val_budget_00256.parquet,${VAL_DIR}/val_budg
 
 # ---- experiment metadata ----
 PROJECT_NAME=${PROJECT_NAME:-RL-Exps}
-EXP_NAME=${EXP_NAME:-lcpo-budget-sync-4b-stage${LCPO_STAGE:-a}}
+EXP_NAME=${EXP_NAME:-lcpo-budget-sync-4b-3-stage${LCPO_STAGE:-a}}
 
 
 # ---- sequence lengths ----
@@ -149,14 +149,41 @@ LCPO_MIN_THINK_FRAC=${LCPO_MIN_THINK_FRAC:-0.10}
 # outweighed correctness 2:1 (ifeval and chat sat at a healthy 0.31-0.50).
 # 3e-4 -> 5e-5 puts math's ratio near 0.35, in line with the other two.
 #
-# Gate G2 still owes a proper calibration: run ~50 stage-a steps, compare
-# critic/lcpo/mode_budget/abs_len_err against each source's task-score spread,
-# then set these so the length term is ~60% of that spread. Note the error being
-# measured is now against TOTAL length, so all three want re-deriving.
+# Gate G2, calibrated 2026-08-24 off the stage-a run of 2026-08-23 (89 steps,
+# length_target=total). Measured within-group over steps 70-89:
+#
+#   source   sd(task)   sd|b-n|   old alpha   old ratio   new alpha (0.8)
+#   ifeval      0.193       643       1.0e-4        0.33            2.4e-4
+#   chat        0.251       550       1.5e-4        0.33            3.7e-4
+#   math        0.222      1084       5.0e-5        0.24            1.6e-4
+#
+# Set to 0.8 of the task spread, not the 0.6 written here before, for two
+# reasons. First, the ratio decays on its own as the policy tightens: within-
+# group sd|b-n| fell 1225 -> 711 over the 89 steps, so whatever is set drifts
+# down ~40% over a run. 0.8 now lands near 0.6 by the end. Second, the usual
+# reason to hold alpha down — that squeezing length costs accuracy — did not
+# show up. Within a group the SHORTER samples score better, not worse:
+# corr(n_total, task_score) is -0.02..-0.09 ifeval, -0.12..-0.20 chat and math.
+# Long responses are where the model is rambling, so there is no accuracy to
+# protect and the earlier caution was priced against a risk that is not there.
+#
+# The old values were far too weak to teach the mapping at all. At 0.24-0.33 the
+# run learned only an unconditional length: at step 80 a 256-token budget drew
+# 1817 tokens and a 6000-token budget drew 2151, and the model's median output
+# (2632) sat on the median budget (3046) — the optimal budget-BLIND strategy
+# under a symmetric penalty. Adherence within +/-25% never moved off ~2-5%.
+#
+# Do NOT switch the term to |b-n|/b to fix this. Relative error looks scale-free
+# but its within-group spread is ~sd|b-n|/b, and sd|b-n| is near constant across
+# rungs, so a single alpha lands 14.7x harder on the <=384 rung than on >5000 —
+# it would swamp the short budgets and starve the long ones. The absolute form
+# already sits at 1.7x across rungs; |log(n/b)| is the only other balanced
+# option at 1.6x, and there is no reason to switch. Re-check the ratio around
+# steps 30 and 60 of the next run rather than trusting these to hold.
 LCPO_ALPHA=${LCPO_ALPHA:-0.0003}
-LCPO_ALPHA_MATH=${LCPO_ALPHA_MATH:-0.00005}
-LCPO_ALPHA_IFEVAL=${LCPO_ALPHA_IFEVAL:-0.0001}
-LCPO_ALPHA_CHAT=${LCPO_ALPHA_CHAT:-0.00015}
+LCPO_ALPHA_MATH=${LCPO_ALPHA_MATH:-0.00016}
+LCPO_ALPHA_IFEVAL=${LCPO_ALPHA_IFEVAL:-0.00024}
+LCPO_ALPHA_CHAT=${LCPO_ALPHA_CHAT:-0.00037}
 
 
 # ---- batching (SYNC semantics — differs from the async script) ----
@@ -182,7 +209,7 @@ fi
 
 
 # ---- rollout / validation dump dirs ----
-DUMP_ROOT=${DUMP_ROOT:-/root/verl/dumps/lcpo_budget_sync}
+DUMP_ROOT=${DUMP_ROOT:-/workspace/verl/dumps/lcpo_budget_sync_new_alphas}
 ROLLOUT_DATA_DIR=${ROLLOUT_DATA_DIR:-${DUMP_ROOT}/rollouts}
 VALIDATION_DATA_DIR=${VALIDATION_DATA_DIR:-${DUMP_ROOT}/val}
 
