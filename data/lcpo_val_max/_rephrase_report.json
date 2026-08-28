@@ -1,0 +1,72 @@
+{
+  "src": "data/lcpo_val",
+  "dst": "data/lcpo_val_max",
+  "from_style": "exact",
+  "to_style": "max",
+  "files": {
+    "val_budget_00256.parquet": {
+      "rows": 300,
+      "rewritten": 300,
+      "untouched": 0,
+      "styles_after": {
+        "budget/max": 300
+      }
+    },
+    "val_budget_00512.parquet": {
+      "rows": 300,
+      "rewritten": 300,
+      "untouched": 0,
+      "styles_after": {
+        "budget/max": 300
+      }
+    },
+    "val_budget_01024.parquet": {
+      "rows": 300,
+      "rewritten": 300,
+      "untouched": 0,
+      "styles_after": {
+        "budget/max": 300
+      }
+    },
+    "val_budget_02048.parquet": {
+      "rows": 300,
+      "rewritten": 300,
+      "untouched": 0,
+      "styles_after": {
+        "budget/max": 300
+      }
+    },
+    "val_budget_04000.parquet": {
+      "rows": 300,
+      "rewritten": 300,
+      "untouched": 0,
+      "styles_after": {
+        "budget/max": 300
+      }
+    },
+    "val_budget_06000.parquet": {
+      "rows": 300,
+      "rewritten": 300,
+      "untouched": 0,
+      "styles_after": {
+        "budget/max": 300
+      }
+    },
+    "val_free.parquet": {
+      "rows": 300,
+      "rewritten": 0,
+      "untouched": 300,
+      "styles_after": {
+        "free/None": 300
+      }
+    },
+    "val_nothink.parquet": {
+      "rows": 300,
+      "rewritten": 0,
+      "untouched": 300,
+      "styles_after": {
+        "nothink/None": 300
+      }
+    }
+  }
+}

@@ -2,9 +2,15 @@
 # LCPO budget training (arXiv 2503.04697) — SYNCHRONOUS (colocate) GRPO, 1 node.
 #
 # Teaches three modes at once, told apart only by the prompt suffix:
-#   "Think for N tokens." + /think   reason within N tokens
-#   /think                           reason freely, no target
-#   /no_think                        no reasoning at all
+#   "Think for a maximum of N tokens." + /think   stay within N tokens  (stage b)
+#   "Think for N tokens." + /think                hit N tokens          (stage a)
+#   /think                                        reason freely, no target
+#   /no_think                                     no reasoning at all
+#
+# The budget wording tracks the stage: stage a punishes undershoot as hard as
+# overshoot, so N is a target; stage b punishes only overshoot, so N is a
+# ceiling. Same sentence for both would leave the model unable to tell which
+# rule is in force. See full_mix/common/budget_prompt.py.
 #
 # Two stages, picked with LCPO_STAGE:
 #   a  LCPO-Exact  reward = task - alpha*|budget - n_think|
@@ -43,12 +49,20 @@ _REPO_ROOT_DIR="$(dirname "$_FM_DIR")"
 export PYTHONPATH="${_REPO_ROOT_DIR}${PYTHONPATH:+:${PYTHONPATH}}"
 
 # ---- model ----
-MODEL_PATH=${MODEL_PATH:-/workspace/verl/model}
+MODEL_PATH=${MODEL_PATH:-/workspace/verl/checkpoints/RL-Exps/lcpo-budget-sync-4b-3-stagea/global_step_480/merged_hf_model}
 
 
 # ---- data ----
-DATA_DIR=${DATA_DIR:-/workspace/verl/data/lcpo_mix}
-VAL_DIR=${VAL_DIR:-/workspace/verl/data/lcpo_val}
+# Stage b reads the REPHRASED mix: "Think for a maximum of N tokens." instead of
+# "Think for N tokens.", because stage b enforces a ceiling and stage a enforced
+# a target. Without the wording change the model cannot tell the two rules apart
+# and stage b just overwrites stage a's behaviour on byte-identical prompts.
+# Built by full_mix/lcpo/rephrase_budget_prompts.py, which rewrites that one
+# sentence and leaves every prompt, budget, mode and uid otherwise bit-identical
+# so the two runs stay comparable. Point these back at lcpo_mix / lcpo_val for
+# stage a.
+DATA_DIR=${DATA_DIR:-/workspace/verl/data/lcpo_mix_max}
+VAL_DIR=${VAL_DIR:-/workspace/verl/data/lcpo_val_max}
 
 CHAT_VARIANT=${CHAT_VARIANT:-chat_with_baseline}
 case "$CHAT_VARIANT" in
@@ -70,7 +84,7 @@ VAL_FILES=${VAL_FILES:-"[${VAL_DIR}/val_budget_00256.parquet,${VAL_DIR}/val_budg
 
 # ---- experiment metadata ----
 PROJECT_NAME=${PROJECT_NAME:-RL-Exps}
-EXP_NAME=${EXP_NAME:-lcpo-budget-sync-4b-3-stage${LCPO_STAGE:-a}}
+EXP_NAME=${EXP_NAME:-lcpo-budget-sync-4b-3-stage${LCPO_STAGE:-b}}
 
 
 # ---- sequence lengths ----
@@ -118,8 +132,31 @@ OVERLONG_PENALTY_FACTOR=${OVERLONG_PENALTY_FACTOR:-1.0}
 
 # ---- LCPO ----
 # stage a = LCPO-Exact, stage b = LCPO-Max (see the header).
-LCPO_STAGE=${LCPO_STAGE:-a}
-LCPO_DELTA=${LCPO_DELTA:-0.5}
+LCPO_STAGE=${LCPO_STAGE:-b}
+# delta is the multiplier a response keeps for landing EXACTLY on budget, and it
+# also sets both edges of the ramp:
+#
+#   mult = clip(alpha*(budget - n_total) + delta, 0, 1)
+#   full credit (mult 1) needs   n <= budget - (1-delta)/alpha
+#   zero credit (mult 0) needs   n >= budget + delta/alpha
+#
+# At the paper's 0.5 with stage-a's 1.6e-4 you had to come in 3125 tokens UNDER
+# budget to score 1.0, which at a 2000-token budget is impossible — measured on
+# the stage-a run at step 480, 0.0% of rows could ever reach 1.0 and the whole
+# term sat flat at ~0.5. That is a dead gradient, not a soft one.
+#
+# 0.85 with 3.5e-4 gives 429 tokens of headroom for full credit and 2429 tokens
+# of overshoot tolerance. Replayed on the stage-a policy that lifts the length
+# term's within-group spread from 0.103/0.118/0.078 to 0.167/0.196/0.130
+# (math/chat/ifeval) with 22-26% of rows at 1.0 and ~0.1% pinned at 0 — a live
+# gradient across the whole ladder, and nothing stuck at either rail.
+#
+# Kept below 1.0 on purpose: at exactly 1.0 anything at or under budget is free,
+# and within a group the SHORTER samples still score better (corr(n_total,
+# task_score) is -0.05 math, -0.04 chat), so the policy would drift short and
+# flatten the ladder. 0.85 leaves a mild pull toward coming in slightly under
+# rather than parking on the cap.
+LCPO_DELTA=${LCPO_DELTA:-0.85}
 # Which length the budget governs. "total" = think + answer, "think" = the think
 # span only. MUST stay "total": under "think" the answer body is unconstrained,
 # so the cheapest way to satisfy a budget is to relocate the reasoning rather
@@ -180,10 +217,18 @@ LCPO_MIN_THINK_FRAC=${LCPO_MIN_THINK_FRAC:-0.10}
 # already sits at 1.7x across rungs; |log(n/b)| is the only other balanced
 # option at 1.6x, and there is no reason to switch. Re-check the ratio around
 # steps 30 and 60 of the next run rather than trusting these to hold.
-LCPO_ALPHA=${LCPO_ALPHA:-0.0003}
-LCPO_ALPHA_MATH=${LCPO_ALPHA_MATH:-0.00016}
-LCPO_ALPHA_IFEVAL=${LCPO_ALPHA_IFEVAL:-0.00024}
-LCPO_ALPHA_CHAT=${LCPO_ALPHA_CHAT:-0.00037}
+# STAGE B (2026-08-26). The per-source split above exists because stage a ADDS
+# the length term, so a source whose task score barely varies gets swamped by it.
+# Stage b MULTIPLIES instead — reward = task * mult — so each source's length
+# term is already scaled by its own task score, and the split is no longer doing
+# any work. One value for all three, near the paper's 3e-4.
+#
+# The stage-a values (1.6e-4 math / 2.4e-4 ifeval / 3.7e-4 chat) are recorded in
+# the block above and want restoring if stage a is ever run again.
+LCPO_ALPHA=${LCPO_ALPHA:-0.00035}
+LCPO_ALPHA_MATH=${LCPO_ALPHA_MATH:-0.00035}
+LCPO_ALPHA_IFEVAL=${LCPO_ALPHA_IFEVAL:-0.00035}
+LCPO_ALPHA_CHAT=${LCPO_ALPHA_CHAT:-0.00035}
 
 
 # ---- batching (SYNC semantics — differs from the async script) ----
@@ -349,7 +394,7 @@ python3 - "$MODEL_PATH" <<'PYEOF' || { echo "chat template preflight failed" >&2
 import sys
 from transformers import AutoTokenizer
 tok = AutoTokenizer.from_pretrained(sys.argv[1])
-for label, suffix in (("budget", "\n\nThink for 800 tokens.\n\n/think"),
+for label, suffix in (("budget", "\n\nThink for a maximum of 800 tokens.\n\n/think"),
                       ("free", "\n\n/think"),
                       ("nothink", "\n\n/no_think")):
     s = tok.apply_chat_template([{"role": "user", "content": "probe" + suffix}],

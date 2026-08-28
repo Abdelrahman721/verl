@@ -1,0 +1,38 @@
+{
+  "src": "data/lcpo_mix",
+  "dst": "data/lcpo_mix_max",
+  "from_style": "exact",
+  "to_style": "max",
+  "files": {
+    "chat_with_baseline_train.parquet": {
+      "rows": 6000,
+      "rewritten": 3592,
+      "untouched": 2408,
+      "styles_after": {
+        "budget/max": 3592,
+        "nothink/None": 1229,
+        "free/None": 1179
+      }
+    },
+    "ifeval_train.parquet": {
+      "rows": 12000,
+      "rewritten": 7193,
+      "untouched": 4807,
+      "styles_after": {
+        "budget/max": 7193,
+        "free/None": 2419,
+        "nothink/None": 2388
+      }
+    },
+    "math_train.parquet": {
+      "rows": 6000,
+      "rewritten": 3601,
+      "untouched": 2399,
+      "styles_after": {
+        "budget/max": 3601,
+        "free/None": 1215,
+        "nothink/None": 1184
+      }
+    }
+  }
+}
