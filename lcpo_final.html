@@ -1,0 +1,703 @@
+<title>Teaching a Model to Count</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Serif:wght@500;600;700&display=swap">
+<style>
+:root{
+  --ground:#eceff3; --surface:#ffffff; --surface-2:#f5f7f9; --sunken:#e3e8ed;
+  --ink:#0f1519; --ink-2:#54616b; --ink-3:#87949f; --rule:#d4dbe1; --rule-2:#e6ebef;
+  --accent:#1f5fb8; --accent-soft:#e5edf9;
+  --s1:#2a78d6; --s2:#eb6834; --s3:#1baf7a;
+  --good:#1baf7a; --warn:#c98500; --crit:#d13d3c;
+  --good-bg:#e3f5ee; --warn-bg:#fbf0d9; --crit-bg:#fbe6e5;
+  --shadow:0 1px 2px rgba(15,21,25,.06),0 8px 24px -12px rgba(15,21,25,.14);
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --ground:#101519; --surface:#181e23; --surface-2:#1d242a; --sunken:#0b0f12;
+  --ink:#e8eef3; --ink-2:#9dabb6; --ink-3:#6b7883; --rule:#2b343c; --rule-2:#222a31;
+  --accent:#6aa5f0; --accent-soft:#1b2a3d;
+  --s1:#3987e5; --s2:#d95926; --s3:#199e70;
+  --good:#199e70; --warn:#c98500; --crit:#e66767;
+  --good-bg:#12312a; --warn-bg:#332708; --crit-bg:#3a1e1e;
+  --shadow:0 1px 2px rgba(0,0,0,.4),0 8px 24px -12px rgba(0,0,0,.6);
+}}
+:root[data-theme="dark"]{
+  --ground:#101519; --surface:#181e23; --surface-2:#1d242a; --sunken:#0b0f12;
+  --ink:#e8eef3; --ink-2:#9dabb6; --ink-3:#6b7883; --rule:#2b343c; --rule-2:#222a31;
+  --accent:#6aa5f0; --accent-soft:#1b2a3d;
+  --s1:#3987e5; --s2:#d95926; --s3:#199e70;
+  --good:#199e70; --warn:#c98500; --crit:#e66767;
+  --good-bg:#12312a; --warn-bg:#332708; --crit-bg:#3a1e1e;
+  --shadow:0 1px 2px rgba(0,0,0,.4),0 8px 24px -12px rgba(0,0,0,.6);
+}
+*{box-sizing:border-box}
+body{
+  background:var(--ground); color:var(--ink);
+  font-family:"IBM Plex Sans",system-ui,-apple-system,Segoe UI,sans-serif;
+  font-size:16.5px; line-height:1.65; margin:0;
+  -webkit-font-smoothing:antialiased;
+}
+.wrap{max-width:1180px;margin:0 auto;padding:0 28px 96px}
+.col{max-width:660px}
+.mono{font-family:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,monospace}
+h1,h2,h3{font-family:"IBM Plex Serif",Georgia,serif;text-wrap:balance;margin:0}
+h1{font-size:clamp(2.3rem,5.2vw,3.5rem);line-height:1.06;font-weight:700;letter-spacing:-.022em}
+h2{font-size:clamp(1.5rem,2.6vw,1.95rem);line-height:1.18;font-weight:600;letter-spacing:-.014em}
+h3{font-size:1.09rem;line-height:1.3;font-weight:600;letter-spacing:-.006em}
+p{margin:0 0 1.05em}
+a{color:var(--accent)}
+.eyebrow{
+  font-family:"IBM Plex Mono",monospace;font-size:.705rem;font-weight:500;
+  letter-spacing:.15em;text-transform:uppercase;color:var(--ink-3);
+}
+/* ---------- masthead ---------- */
+header.top{padding:76px 0 44px;border-bottom:1px solid var(--rule)}
+.kicker{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-bottom:26px}
+.tag{
+  font-family:"IBM Plex Mono",monospace;font-size:.7rem;letter-spacing:.07em;
+  padding:4px 9px;border:1px solid var(--rule);border-radius:3px;color:var(--ink-2);
+  background:var(--surface);text-transform:uppercase;
+}
+.standfirst{font-size:1.19rem;line-height:1.55;color:var(--ink-2);max-width:640px;margin-top:22px}
+.byline{margin-top:30px;font-size:.83rem;color:var(--ink-3);display:flex;gap:20px;flex-wrap:wrap}
+.byline b{color:var(--ink-2);font-weight:500}
+/* ---------- verdict tiles ---------- */
+.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:16px;margin:44px 0 8px}
+.tile{background:var(--surface);border:1px solid var(--rule);border-radius:5px;padding:20px 20px 22px;box-shadow:var(--shadow)}
+.tile .lab{font-family:"IBM Plex Mono",monospace;font-size:.68rem;letter-spacing:.13em;text-transform:uppercase;color:var(--ink-3);margin-bottom:12px}
+.tile .big{font-family:"IBM Plex Serif",serif;font-size:1.42rem;font-weight:600;line-height:1.2;margin-bottom:9px;letter-spacing:-.01em}
+.tile .sub{font-size:.87rem;color:var(--ink-2);line-height:1.5}
+.tile.ok .big{color:var(--good)} .tile.warn .big{color:var(--warn)} .tile.bad .big{color:var(--crit)}
+/* ---------- layout ---------- */
+.layout{display:grid;grid-template-columns:1fr;gap:0}
+@media(min-width:1080px){
+  .layout{grid-template-columns:186px 1fr;gap:56px;align-items:start}
+  nav.toc{position:sticky;top:32px;padding-top:64px}
+}
+nav.toc{display:none}
+@media(min-width:1080px){nav.toc{display:block}}
+nav.toc ol{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:2px}
+nav.toc a{
+  display:block;padding:6px 10px;font-size:.795rem;color:var(--ink-2);text-decoration:none;
+  border-left:2px solid var(--rule-2);line-height:1.35;border-radius:0 3px 3px 0;
+}
+nav.toc a:hover{color:var(--ink);background:var(--surface);border-left-color:var(--accent)}
+nav.toc a .n{font-family:"IBM Plex Mono",monospace;font-size:.7rem;color:var(--ink-3);margin-right:7px}
+section{padding-top:64px;scroll-margin-top:24px}
+.sec-head{border-top:2px solid var(--ink);padding-top:14px;margin-bottom:26px}
+.sec-head .eyebrow{display:block;margin-bottom:9px}
+.lede{font-size:1.06rem;color:var(--ink-2);max-width:660px;margin-top:14px}
+/* ---------- change ledger ---------- */
+.ledger{display:flex;flex-direction:column;gap:0;margin:32px 0;border-top:1px solid var(--rule)}
+.change{
+  display:grid;grid-template-columns:52px 1fr;gap:0 20px;
+  padding:22px 0;border-bottom:1px solid var(--rule);
+}
+@media(min-width:760px){.change{grid-template-columns:52px 1fr 132px}}
+.change .cid{font-family:"IBM Plex Mono",monospace;font-size:.83rem;font-weight:600;color:var(--accent);padding-top:2px}
+.change h3{margin-bottom:7px}
+.change .why{font-size:.9rem;color:var(--ink-2);margin:0 0 11px}
+.change .ev{
+  font-family:"IBM Plex Mono",monospace;font-size:.78rem;color:var(--ink-2);
+  background:var(--surface-2);border:1px solid var(--rule-2);border-radius:4px;
+  padding:9px 12px;line-height:1.65;
+}
+.change .ev b{color:var(--ink);font-weight:600}
+.chip{
+  display:inline-flex;align-items:center;gap:6px;font-family:"IBM Plex Mono",monospace;
+  font-size:.7rem;font-weight:600;letter-spacing:.06em;text-transform:uppercase;
+  padding:4px 9px;border-radius:3px;white-space:nowrap;
+}
+.chip.ok{background:var(--good-bg);color:var(--good)}
+.chip.warn{background:var(--warn-bg);color:var(--warn)}
+.chip.bad{background:var(--crit-bg);color:var(--crit)}
+.chip .dot{width:6px;height:6px;border-radius:50%;background:currentColor;flex:none}
+.change .verdict{grid-column:2;margin-top:12px}
+@media(min-width:760px){.change .verdict{grid-column:3;grid-row:1;margin-top:2px;justify-self:end}}
+/* ---------- figures ---------- */
+figure{margin:36px 0;background:var(--surface);border:1px solid var(--rule);border-radius:6px;padding:22px 22px 16px;box-shadow:var(--shadow)}
+figure .fhead{margin-bottom:4px}
+figure h3{margin-bottom:5px}
+figure .fsub{font-size:.87rem;color:var(--ink-2);margin:0 0 18px;max-width:600px}
+figcaption{font-size:.83rem;color:var(--ink-2);margin-top:14px;padding-top:13px;border-top:1px solid var(--rule-2);line-height:1.55}
+figcaption b{color:var(--ink);font-weight:600}
+.chart{width:100%;position:relative}
+.chart svg{display:block;width:100%;height:auto;overflow:visible}
+.legend{display:flex;flex-wrap:wrap;gap:8px 18px;margin-bottom:14px}
+.legend .li{display:inline-flex;align-items:center;gap:7px;font-size:.8rem;color:var(--ink-2)}
+.legend .sw{width:14px;height:3px;border-radius:2px;flex:none}
+.legend .sw.sq{width:10px;height:10px;border-radius:2px}
+.tip{
+  position:absolute;pointer-events:none;opacity:0;transition:opacity .1s;
+  background:var(--surface);border:1px solid var(--rule);border-radius:4px;
+  box-shadow:var(--shadow);padding:8px 10px;font-size:.78rem;z-index:20;
+  font-family:"IBM Plex Mono",monospace;line-height:1.55;white-space:nowrap;color:var(--ink);
+}
+.tip .th{font-weight:600;margin-bottom:4px;display:block}
+.tip .tr{display:flex;justify-content:space-between;gap:14px}
+.tip .tr .sw{width:8px;height:8px;border-radius:2px;display:inline-block;margin-right:6px}
+/* ---------- tables ---------- */
+.tblwrap{overflow-x:auto;margin:26px 0;border:1px solid var(--rule);border-radius:6px;background:var(--surface)}
+table{border-collapse:collapse;width:100%;font-size:.845rem;font-variant-numeric:tabular-nums}
+th,td{padding:9px 13px;text-align:right;border-bottom:1px solid var(--rule-2);white-space:nowrap}
+th:first-child,td:first-child{text-align:left}
+thead th{
+  font-family:"IBM Plex Mono",monospace;font-size:.68rem;letter-spacing:.09em;text-transform:uppercase;
+  color:var(--ink-3);font-weight:500;background:var(--surface-2);border-bottom:1px solid var(--rule);
+  position:sticky;top:0;
+}
+tbody tr:last-child td{border-bottom:none}
+tbody tr:hover{background:var(--surface-2)}
+td.num,th.num{font-family:"IBM Plex Mono",monospace}
+td.g{color:var(--good);font-weight:600} td.b{color:var(--crit);font-weight:600} td.w{color:var(--warn);font-weight:600}
+caption{caption-side:bottom;text-align:left;padding:11px 13px;font-size:.8rem;color:var(--ink-2);border-top:1px solid var(--rule-2)}
+/* ---------- callouts ---------- */
+.note{
+  border-left:3px solid var(--accent);background:var(--accent-soft);
+  padding:16px 20px;border-radius:0 5px 5px 0;margin:28px 0;font-size:.94rem;
+}
+.note.bad{border-left-color:var(--crit);background:var(--crit-bg)}
+.note.ok{border-left-color:var(--good);background:var(--good-bg)}
+.note .nh{font-family:"IBM Plex Mono",monospace;font-size:.7rem;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-2);margin-bottom:8px}
+.note p:last-child{margin-bottom:0}
+.eq{
+  font-family:"IBM Plex Mono",monospace;font-size:.9rem;background:var(--sunken);
+  border:1px solid var(--rule);border-radius:5px;padding:15px 18px;margin:22px 0;
+  overflow-x:auto;color:var(--ink);
+}
+code{font-family:"IBM Plex Mono",monospace;font-size:.87em;background:var(--surface-2);padding:1px 5px;border-radius:3px;border:1px solid var(--rule-2)}
+.note code{background:var(--surface)}
+ul.tight{padding-left:20px;margin:0 0 1.05em}
+ul.tight li{margin-bottom:7px}
+hr.soft{border:none;border-top:1px solid var(--rule);margin:52px 0 0}
+.kv{display:grid;grid-template-columns:auto 1fr;gap:5px 16px;font-size:.87rem;margin:20px 0}
+.kv dt{font-family:"IBM Plex Mono",monospace;color:var(--ink-3);font-size:.79rem;white-space:nowrap}
+.kv dd{margin:0;color:var(--ink-2)}
+footer{margin-top:72px;padding-top:26px;border-top:1px solid var(--rule);font-size:.83rem;color:var(--ink-3)}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:2px}
+@media(prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+</style>
+
+<style>
+/* heatmap */
+.heat{overflow-x:auto;margin:8px 0 0}
+table.hm{border-collapse:separate;border-spacing:2px;font-size:.76rem;font-variant-numeric:tabular-nums}
+table.hm th{
+  font-family:"IBM Plex Mono",monospace;font-size:.67rem;letter-spacing:.05em;color:var(--ink-3);
+  font-weight:500;padding:3px 6px;background:none;border:none;position:static;text-transform:none;
+}
+table.hm th.rowlab{text-align:left;padding-right:10px;white-space:nowrap;color:var(--ink-2)}
+table.hm th.grp{text-align:left;color:var(--ink);font-weight:600;font-family:"IBM Plex Sans",sans-serif;
+  font-size:.8rem;padding-top:9px;letter-spacing:0}
+table.hm td{
+  padding:0;border:none;text-align:center;width:46px;height:26px;border-radius:3px;
+  font-family:"IBM Plex Mono",monospace;font-size:.72rem;white-space:nowrap;
+}
+table.hm td span{display:block;padding:5px 0;border-radius:3px}
+.scale{display:flex;align-items:center;gap:9px;margin:14px 0 2px;font-size:.75rem;color:var(--ink-2)}
+.scale .bar{display:flex;gap:2px}
+.scale .bar i{width:26px;height:11px;border-radius:2px;display:block}
+.grid2{display:grid;grid-template-columns:1fr;gap:20px}
+@media(min-width:900px){.grid2{grid-template-columns:1fr 1fr}}
+.mini{background:var(--surface-2);border:1px solid var(--rule-2);border-radius:5px;padding:14px 16px}
+.mini .lab{font-family:"IBM Plex Mono",monospace;font-size:.67rem;letter-spacing:.11em;text-transform:uppercase;color:var(--ink-3);margin-bottom:7px}
+.mini .val{font-family:"IBM Plex Serif",serif;font-size:1.3rem;font-weight:600;line-height:1.15}
+.mini .val small{font-size:.8rem;color:var(--ink-3);font-weight:400;font-family:"IBM Plex Mono",monospace}
+.mini .note{font-size:.8rem;color:var(--ink-2);margin-top:5px;line-height:1.45}
+.statrow{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin:24px 0}
+.arrow{color:var(--ink-3);padding:0 3px}
+.up{color:var(--good);font-weight:600}
+.down{color:var(--crit);font-weight:600}
+.flat{color:var(--ink-2);font-weight:600}
+</style>
+
+
+<div class="wrap">
+<header class="top">
+  <div class="kicker">
+    <span class="tag">LCPO · full experiment</span>
+    <span class="tag">4 runs · 1,300 steps</span>
+    <span class="tag">2026-08-19 → 08-27</span>
+  </div>
+  <h1>Teaching a Model to Count</h1>
+  <p class="standfirst">Four runs to make a model write the number of tokens you ask for. It worked — and
+  then the stage meant to polish it gave most of it back. This is the whole arc, what each change did, and
+  which checkpoint to ship.</p>
+  <div class="byline">
+    <span><b>Runs</b> <span class="mono">bksthy7c · 93byigsw · 993f1rob</span></span>
+    <span><b>Rollouts analysed</b> ~950,000</span>
+    <span><b>Written</b> 2026-08-27</span>
+  </div>
+  <div class="tiles">
+    <div class="tile ok">
+      <div class="lab">The goal</div>
+      <div class="big">Reached</div>
+      <div class="sub">Stage A ended writing <b>0.99×</b> of the requested budget and hitting it
+      <b>78%</b> of the time, from a start of 15%.</div>
+    </div>
+    <div class="tile warn">
+      <div class="lab">Then Stage B</div>
+      <div class="big">Gave it back</div>
+      <div class="sub">Down to <b>0.41×</b> and <b>4.9%</b> on target. The reward that only punishes
+      overshoot cannot hold length up.</div>
+    </div>
+    <div class="tile ok">
+      <div class="lab">But not for nothing</div>
+      <div class="big">Better answers</div>
+      <div class="sub">Stage B's free mode: chat <b>0.547 → 0.623</b>, and every source writes
+      25–30% fewer tokens for the same or better score.</div>
+    </div>
+  </div>
+</header>
+
+<div class="layout">
+<nav class="toc" aria-label="Contents">
+  <ol>
+    <li><a href="#arc"><span class="n">00</span>The arc</a></li>
+    <li><a href="#curve"><span class="n">01</span>The whole run</a></li>
+    <li><a href="#worked"><span class="n">02</span>What worked</a></li>
+    <li><a href="#stageb"><span class="n">03</span>Why Stage B slipped</a></li>
+    <li><a href="#ship"><span class="n">04</span>Which to ship</a></li>
+    <li><a href="#lessons"><span class="n">05</span>What we learned</a></li>
+  </ol>
+</nav>
+<main>
+
+<section id="arc">
+  <div class="sec-head"><span class="eyebrow">00 — The arc</span><h2>Four runs</h2></div>
+  <div class="col">
+  <p>The task: teach one model three behaviours at once — think within a token budget, think freely, or
+  not think at all — told apart only by a line in the prompt.</p>
+  </div>
+  <div class="ledger">
+    <div class="change">
+      <div class="cid">R1</div>
+      <div>
+        <h3>19 Aug — the relocation exploit</h3>
+        <p class="why">Only the think span was penalised. Budgeted math learned to emit an empty
+        <code>&lt;think&gt;&lt;/think&gt;</code> and move the reasoning into the answer, where nothing
+        counted it.</p>
+        <div class="ev">think <b>8045 → 3</b> tokens while the answer grew <b>399 → 1376</b>.<br>
+        Lesson: whatever you penalise is the only thing that gets compressed.</div>
+      </div>
+      <div class="verdict"><span class="chip bad"><span class="dot"></span>Failed</span></div>
+    </div>
+    <div class="change">
+      <div class="cid">R2</div>
+      <div>
+        <h3>23 Aug — seven fixes, but the budget still ignored</h3>
+        <p class="why">Penalise total length, floor the think span, fix the metrics, tag the val ladder.
+        All held. But the length penalty was set too weakly.</p>
+        <div class="ev">every structural failure closed and stayed closed for 101 steps.<br>
+        Budget-to-length correlation after 101 steps: <b>0.05</b>. The model learned one length and
+        ignored the number.</div>
+      </div>
+      <div class="verdict"><span class="chip warn"><span class="dot"></span>Too weak</span></div>
+    </div>
+    <div class="change">
+      <div class="cid">R3</div>
+      <div>
+        <h3>24–26 Aug — stronger penalty, and it worked</h3>
+        <p class="why">Alphas roughly tripled. Math collapsed for 60 steps, recovered on its own, then the
+        budget mapping appeared and kept improving for 480 steps.</p>
+        <div class="ev">on target <b>15% → 78%</b>, correlation <b>0.03 → 0.93</b>, ratio
+        <b>0.99×</b>.<br>Accuracy rose at the same time: ifeval 0.52 → 0.68, chat 0.41 → 0.54.</div>
+      </div>
+      <div class="verdict"><span class="chip ok"><span class="dot"></span>The goal</span></div>
+    </div>
+    <div class="change">
+      <div class="cid">R4</div>
+      <div>
+        <h3>26–27 Aug — Stage B, the ceiling</h3>
+        <p class="why">Switch to a reward that only punishes overshoot, and reword the prompt to "a
+        maximum of N tokens". Meant to let bigger budgets buy better answers.</p>
+        <div class="ev">length fell to <b>0.41×</b> of budget, on target to <b>4.9%</b>.<br>
+        Free-mode quality rose and lengths fell 25–30%.</div>
+      </div>
+      <div class="verdict"><span class="chip warn"><span class="dot"></span>Traded away</span></div>
+    </div>
+  </div>
+</section>
+
+<section id="curve">
+  <div class="sec-head"><span class="eyebrow">01 — The whole run</span>
+  <h2>Eight hundred steps in one picture</h2></div>
+  <figure>
+    <div class="fhead"><h3>How closely the model followed the budget</h3>
+    <p class="fsub">Length ÷ budget across both stages. 1.00× means it writes exactly what was asked.</p></div>
+    <div class="legend" id="lg-ratio"></div>
+    <div class="chart" id="fig-ratio"></div>
+    <figcaption>Stage A climbs from 0.5× to <b>0.99×</b> over 480 steps. Stage B drops it to
+    <b>0.41×</b> in 335. The dip near step 40 of Stage A is the math collapse it recovered from
+    unaided.</figcaption>
+  </figure>
+  <figure>
+    <div class="fhead"><h3>Does the model read the number at all?</h3>
+    <p class="fsub">Correlation between the budget asked for and the length written. 0 means ignored.</p></div>
+    <div class="legend" id="lg-corr"></div>
+    <div class="chart" id="fig-corr"></div>
+    <figcaption>Flat near zero for the first 180 steps of Stage A, then a steep climb to <b>0.93</b>.
+    Stage B has eroded it to <b>0.78</b> — the ladder is now losing its shape, not just its scale.</figcaption>
+  </figure>
+</section>
+
+<section id="worked">
+  <div class="sec-head"><span class="eyebrow">02 — What worked</span>
+  <h2>The two changes that mattered</h2></div>
+  <div class="col">
+  <p>Of everything tried, two changes account for almost all the progress.</p>
+  <h3 style="margin-top:22px">1. Penalise the whole response, not just the thinking</h3>
+  <p>This closed the relocation exploit permanently. Once total length was the target, moving reasoning
+  into the answer stopped helping, and the empty think block never came back in 800 further steps.</p>
+  <h3>2. Make the length penalty strong enough to matter</h3>
+  <p>At the original strength the length term's within-group spread was 0.24–0.33 of the task score's. The
+  model responded by learning a single length near the median budget — the best strategy that ignores the
+  number entirely. Roughly tripling the penalty is what made the mapping appear, and it took 180 steps
+  before anything visible happened.</p>
+  <p>Everything else — the think floor, the metric plumbing, the val ladder tagging, the entry-point
+  fix — was necessary but not sufficient. They stopped failures rather than causing progress.</p>
+  </div>
+</section>
+
+<section id="stageb">
+  <div class="sec-head"><span class="eyebrow">03 — Why Stage B slipped</span>
+  <h2>A one-sided reward cannot hold length up</h2></div>
+  <div class="col">
+  <p>Stage B's length term only subtracts for writing too much. It never adds for writing more:</p>
+  </div>
+  <div class="eq">mult = clip(α·(budget − n) + δ, 0, 1)     →  1.0 for anything under budget</div>
+  <div class="col">
+  <p>About <b>88%</b> of rows now sit at exactly 1.0, so for most of the batch the length term contributes
+  no gradient at all. The only thing that stops the model shrinking is the answer becoming wrong — and
+  that is a soft, late floor.</p>
+  <p>It is not a smooth slide. Length fell to 0.42×, recovered to 0.59× around step 140, held near 0.53×
+  for a hundred steps, then fell again to <b>0.41×</b>. The model and the penalty chase each other:
+  shrinking switches the penalty off, accuracy eventually pulls back, the penalty re-engages, and it
+  repeats.</p>
+  <p>Two thirds of the initial drop was not training at all. The first evaluation uses the <em>same
+  weights</em> as Stage A's final checkpoint and only changes the prompt from "Think for N tokens" to
+  "Think for a maximum of N tokens". That alone cut on-target from <b>46.5%</b> to <b>22.9%</b>. The
+  wording is part of the specification, and changing it discarded the calibration.</p>
+  </div>
+  <div class="note">
+    <div class="nh">And it did not buy what it was for</div>
+    <p>Stage B exists so that a bigger budget buys a better answer. Measured as accuracy gained per 10×
+    more budget: MATH-500 +0.085 → +0.077, gsm8k +0.044 → +0.025, IFEval +0.005 → +0.046. Two down, one
+    up, from a base that was already there. No net gain.</p>
+    <p>That was foreseeable from the data: only math has a real compute-accuracy slope, and it is a
+    quarter of the mix. There was little monotonicity available to buy.</p>
+  </div>
+</section>
+
+<section id="ship">
+  <div class="sec-head"><span class="eyebrow">04 — Which to ship</span>
+  <h2>Two checkpoints, good at different things</h2></div>
+  <div class="tblwrap"><table>
+  <caption>Stage A step 480 vs Stage B step 335. Green marks the better of the pair.</caption>
+  <thead><tr><th></th><th class="num">Stage A · 480</th><th class="num">Stage B · 335</th></tr></thead>
+  <tbody>
+  <tr><td>writes ÷ budget</td><td class="num g">0.99×</td><td class="num">0.41×</td></tr>
+  <tr><td>on target (±25%)</td><td class="num g">78.4%</td><td class="num">4.9%</td></tr>
+  <tr><td>budget↔length correlation</td><td class="num g">0.933</td><td class="num">0.781</td></tr>
+  <tr><td>training task score</td><td class="num">0.545</td><td class="num g">0.586</td></tr>
+  <tr><td>free mode — chat</td><td class="num">0.547</td><td class="num g">0.623</td></tr>
+  <tr><td>free mode — ifeval</td><td class="num">0.715</td><td class="num">0.715</td></tr>
+  <tr><td>free mode — math</td><td class="num g">0.342</td><td class="num">0.304</td></tr>
+  <tr><td>free-mode tokens (chat)</td><td class="num">3227</td><td class="num g">2252</td></tr>
+  <tr><td>well-formed</td><td class="num">99.8%</td><td class="num g">99.9%</td></tr>
+  </tbody></table></div>
+  <div class="col">
+  <p><b>Ship Stage A step 480.</b> It is the model the project set out to build: ask for 2,000 tokens and
+  you get about 2,000, at every budget from 256 to 6,000, with accuracy above where it started on all
+  three sets.</p>
+  <p>Stage B's checkpoint is a real alternative if you never need the number to be literal — it answers
+  better per token and its dial is still ordered — but "N means roughly 0.4N, and drifting" is a hard
+  property to document, and the correlation is now falling as well as the scale.</p>
+  <h3 style="margin-top:24px">If you want the ceiling wording too</h3>
+  <p>Keep Stage A's symmetric reward and change only the prompt, then retrain briefly so the calibration
+  transfers to the new phrasing. That gets the "maximum of N" semantics without giving up the scale. It is
+  a short run, not a new stage.</p>
+  </div>
+  <figure>
+    <div class="fhead"><h3>Free-mode quality against free-mode length</h3>
+    <p class="fsub">Each point is one training window. Up and to the left is better — more accurate, fewer tokens.</p></div>
+    <div class="legend" id="lg-free"></div>
+    <div class="chart" id="fig-free"></div>
+    <figcaption>Both stages push left. Stage B pushes furthest: chat and ifeval end up
+    <b>25–30%</b> shorter than where Stage A left them, at equal or better accuracy. Whatever else it did,
+    it made the model less wasteful.</figcaption>
+  </figure>
+</section>
+
+<section id="lessons">
+  <div class="sec-head"><span class="eyebrow">05 — What we learned</span>
+  <h2>Seven things worth keeping</h2></div>
+  <div class="col">
+  <ul class="tight">
+    <li><b>Whatever you penalise is the only thing that gets compressed.</b> Penalise the think span and
+    the reasoning moves into the answer. This cost one entire run.</li>
+    <li><b>A weak symmetric penalty teaches the median, not the mapping.</b> The model wrote one length
+    close to the median budget — the optimal strategy for ignoring the number — and looked like it was
+    "slowly learning" for 180 steps.</li>
+    <li><b>Check whether giving up beats trying, not just whether the signal is strong.</b> Raising the
+    penalty crossed a threshold where a zero-scoring short answer out-earned an honest attempt, and math
+    collapsed. The condition is
+    <code>α &lt; task ⁄ (|b−n<sub>honest</sub>| − |b−n<sub>quit</sub>|)</code>.</li>
+    <li><b>That collapse was self-limiting.</b> As the model shortened, the honest penalty fell and honest
+    work paid again. It climbed out unaided by step 80. Stopping the run — which I recommended — would
+    have thrown that away.</li>
+    <li><b>A one-sided reward cannot hold a quantity up.</b> Stage B can only punish overshoot, so nothing
+    resists shrinking except the task score.</li>
+    <li><b>The prompt wording is part of the reward specification.</b> Changing four words cost half the
+    length calibration before a single gradient step.</li>
+    <li><b>Measure the grader before believing the metrics.</b> The gsm8k scorer wanted the answer after
+    <code>####</code> with exactly one space, and rejected <b>48%</b> of correct answers. It made gsm8k
+    look like it was collapsing for two reports running.</li>
+  </ul>
+  </div>
+</section>
+</main></div>
+<footer>
+  <p>Stage A: run <span class="mono">93byigsw</span>, 482 steps, 493,568 rollouts, 25 validation ladders.
+  Stage B: run <span class="mono">993f1rob</span>, 335 steps, 343,040 rollouts, 17 ladders. Earlier runs
+  from <span class="mono">bksthy7c</span> and the 2026-08-19 commit record. Accuracy is the raw task
+  score, before the format and floor gates; gsm8k uses the repaired grader.</p>
+</footer>
+</div>
+
+
+<script>
+const D = {"A":{"x":[15,45,75,105,135,165,195,225,255,285,315,345,375,405,435,465,495],"ratio":[0.885,0.576,0.789,0.885,0.897,0.926,0.935,1.02,0.974,0.953,0.961,0.976,0.978,0.975,1.008,0.979,0.983],"w25":[15.2,16.4,19.1,23.0,26.6,28.8,31.0,38.0,49.7,55.9,62.4,64.7,69.5,73.0,76.6,78.2,75.1],"corr":[0.025,0.048,-0.043,0.064,0.114,0.148,0.301,0.557,0.747,0.852,0.872,0.891,0.898,0.913,0.927,0.932,0.92],"task":[0.4353,0.4093,0.4348,0.4436,0.4587,0.467,0.4722,0.4691,0.4819,0.5015,0.514,0.518,0.5305,0.5216,0.5375,0.5455,0.512],"len":[3763.0,2138.3,2710.1,2972.7,2856.7,2851.3,2858.7,3067.8,2981.6,2916.2,3033.5,3045.2,2960.8,3000.4,3183.3,3086.6,2891.4]},"B":{"x":[497,527,557,587,617,647,677,707,737,767,797,827],"ratio":[0.597,0.477,0.454,0.417,0.575,0.538,0.527,0.557,0.512,0.511,0.403,0.438],"w25":[17.6,6.7,6.1,4.4,17.2,12.8,11.2,14.8,12.0,12.6,4.5,7.3],"corr":[0.887,0.881,0.85,0.847,0.853,0.866,0.872,0.859,0.833,0.806,0.783,0.771],"task":[0.5299,0.5207,0.5402,0.5346,0.5475,0.5561,0.5554,0.5414,0.5626,0.5707,0.5822,0.611],"len":[1870.6,1513.9,1437.8,1354.1,1813.2,1665.7,1635.5,1724.8,1554.8,1523.6,1276.3,1306.1]},"split":482,"free":{"A_math":{"x":[15,45,75,105,135,165,195,225,255,285,315,345,375,405,435,465,495],"acc":[0.3228,0.2948,0.2982,0.2482,0.2191,0.2201,0.2973,0.2747,0.2627,0.3039,0.273,0.3106,0.3131,0.3793,0.311,0.3516,0.5417],"len":[9910.5,6388.5,5629.0,4860.3,4439.9,4413.8,4630.5,5013.6,4802.0,4878.5,4612.0,4751.7,4613.7,4402.8,4556.6,4009.5,3676.5]},"A_chat":{"x":[15,45,75,105,135,165,195,225,255,285,315,345,375,405,435,465,495],"acc":[0.4674,0.52,0.4679,0.4806,0.5158,0.475,0.5271,0.5421,0.5444,0.5583,0.5137,0.5371,0.4877,0.576,0.5707,0.5385,0.6719],"len":[1982.9,2023.3,2440.9,2114.1,2296.5,2280.4,2612.2,2778.8,2727.4,3020.4,2869.6,3137.3,3072.1,3176.4,3147.9,3124.6,3310.1]},"A_ifeval":{"x":[15,45,75,105,135,165,195,225,255,285,315,345,375,405,435,465,495],"acc":[0.5456,0.5569,0.5467,0.5529,0.5793,0.5515,0.6458,0.5977,0.6321,0.6356,0.6425,0.6507,0.6754,0.6505,0.6972,0.7097,0.7132],"len":[2538.8,2170.3,2202.1,2348.9,2493.5,2701.4,2786.8,3171.6,2887.5,2928.4,2772.3,2853.6,2821.2,2766.8,2931.1,2732.1,2767.5]},"B_math":{"x":[497,527,557,587,617,647,677,707,737,767,797,827],"acc":[0.2875,0.2924,0.3177,0.3238,0.3179,0.2634,0.3519,0.306,0.3044,0.3362,0.3061,0.2917],"len":[4115.3,3816.2,3841.6,3584.6,3592.9,3495.8,3243.9,3108.5,2991.1,2871.9,2782.3,3280.4]},"B_chat":{"x":[497,527,557,587,617,647,677,707,737,767,797,827],"acc":[0.5557,0.5787,0.551,0.5563,0.6015,0.5882,0.6072,0.6255,0.5977,0.6273,0.6261,0.6074],"len":[2986.7,2773.0,2862.5,2579.8,2575.0,2446.3,2393.1,2245.0,2294.8,2339.4,2245.8,2284.9]},"B_ifeval":{"x":[497,527,557,587,617,647,677,707,737,767,797,827],"acc":[0.6715,0.7166,0.6814,0.6719,0.6945,0.6794,0.7372,0.6986,0.7075,0.7084,0.7283,0.6401],"len":[2710.2,2640.3,2701.2,2607.4,2504.1,2404.5,2317.7,2433.4,2492.1,2350.7,2133.0,2051.5]}},"endA":{"ratio":0.986,"w25":78.4,"corr":0.933,"task":0.5452,"len":3106.8,"wellformed":99.79,"free_math_acc":0.3416,"free_math_len":4086.5,"free_chat_acc":0.5471,"free_chat_len":3227.1,"free_ifeval_acc":0.7151,"free_ifeval_len":2774.9},"endB":{"ratio":0.407,"w25":4.9,"corr":0.781,"task":0.5862,"len":1280.4,"wellformed":99.92,"free_math_acc":0.3039,"free_math_len":2859.6,"free_chat_acc":0.6232,"free_chat_len":2251.8,"free_ifeval_acc":0.7152,"free_ifeval_len":2120.9}};
+const NS="http://www.w3.org/2000/svg";
+const el=(t,a={})=>{const n=document.createElementNS(NS,t);for(const k in a)n.setAttribute(k,a[k]);return n;};
+const V=n=>getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+function ramp(){const dark=isDark();
+  return dark?["#24405f","#2f5f9c","#3987e5","#63a2ee","#8fbef5","#bcd9fb"]
+             :["#c3d8f3","#93b9e8","#6a9ede","#2a78d6","#1f5aa3","#153c6e"];}
+function isDark(){const s=document.documentElement.getAttribute("data-theme");
+  if(s==="dark")return true; if(s==="light")return false;
+  return matchMedia("(prefers-color-scheme: dark)").matches;}
+const fmtN=v=>v>=1000?v.toLocaleString(undefined,{maximumFractionDigits:0}):(Math.round(v*100)/100).toString();
+const fmtP=v=>(Math.round(v*10)/10)+"%";
+const fmt2=v=>v.toFixed(2);
+const fmt3=v=>v.toFixed(3);
+
+/* ---------- line chart ---------- */
+function lineChart(host,o){
+  host.innerHTML="";
+  const W=o.w||760,H=o.h||300,P={t:14,r:o.padR||16,b:38,l:o.padL||52};
+  const svg=el("svg",{viewBox:`0 0 ${W} ${H}`,role:"img","aria-label":o.aria||"chart"});
+  const ink=V("--ink"),ink2=V("--ink-2"),ink3=V("--ink-3"),rule=V("--rule-2");
+  const xs=o.x, allY=o.series.flatMap(s=>s.data.filter(v=>v!=null));
+  let y0=o.y0!=null?o.y0:Math.min(...allY), y1=o.y1!=null?o.y1:Math.max(...allY);
+  if(o.yLog){y0=Math.max(y0,1);}
+  const pad=(y1-y0)*0.10||1; if(o.y0==null)y0=o.yLog?y0*0.85:y0-pad; if(o.y1==null)y1=o.yLog?y1*1.15:y1+pad;
+  const lg=v=>Math.log10(Math.max(v,1e-9));
+  const X=o.xLog?(v=>P.l+(lg(v)-lg(xs[0]))/(lg(xs[xs.length-1])-lg(xs[0]))*(W-P.l-P.r))
+                :(i=>P.l+(xs.length<2?0:i/(xs.length-1))*(W-P.l-P.r));
+  const Y=v=>o.yLog?H-P.b-(lg(v)-lg(y0))/(lg(y1)-lg(y0))*(H-P.t-P.b)
+                   :H-P.b-(v-y0)/(y1-y0)*(H-P.t-P.b);
+  const yt=o.yTicks||niceTicks(y0,y1,o.yLog);
+  yt.forEach(v=>{const y=Y(v);
+    svg.appendChild(el("line",{x1:P.l,x2:W-P.r,y1:y,y2:y,stroke:rule,"stroke-width":1}));
+    const t=el("text",{x:P.l-9,y:y+4,"text-anchor":"end",fill:ink3,"font-size":11,"font-family":"IBM Plex Mono, monospace"});
+    t.textContent=(o.yFmt||fmtN)(v);svg.appendChild(t);});
+  if(o.yLabel){const t=el("text",{x:P.l-9,y:P.t-2,"text-anchor":"end",fill:ink3,"font-size":10,"font-family":"IBM Plex Mono, monospace"});t.textContent=o.yLabel;svg.appendChild(t);}
+  const xt=o.xTickIdx||defaultXTicks(xs.length);
+  xt.forEach(i=>{const x=o.xLog?X(xs[i]):X(i);
+    const t=el("text",{x,y:H-P.b+18,"text-anchor":"middle",fill:ink3,"font-size":11,"font-family":"IBM Plex Mono, monospace"});
+    t.textContent=(o.xFmt||(v=>v))(xs[i]);svg.appendChild(t);});
+  if(o.xLabel){const t=el("text",{x:W-P.r,y:H-4,"text-anchor":"end",fill:ink3,"font-size":10,"font-family":"IBM Plex Mono, monospace"});t.textContent=o.xLabel;svg.appendChild(t);}
+  svg.appendChild(el("line",{x1:P.l,x2:W-P.r,y1:H-P.b,y2:H-P.b,stroke:V("--rule"),"stroke-width":1}));
+  if(o.ref){const pts=xs.map((v,i)=>[o.xLog?X(v):X(i),Y(o.ref(v))]);
+    svg.appendChild(el("path",{d:"M"+pts.map(p=>p.join(" ")).join("L"),fill:"none",stroke:ink3,"stroke-width":1.5,"stroke-dasharray":"5 4","stroke-linecap":"round"}));
+    const last=pts[pts.length-1];
+    const t=el("text",{x:last[0]-4,y:last[1]-8,"text-anchor":"end",fill:ink3,"font-size":10.5,"font-family":"IBM Plex Mono, monospace"});
+    t.textContent=o.refLabel||"";svg.appendChild(t);}
+  if(o.hline!=null){const y=Y(o.hline);
+    svg.appendChild(el("line",{x1:P.l,x2:W-P.r,y1:y,y2:y,stroke:V("--warn"),"stroke-width":1.5,"stroke-dasharray":"5 4"}));
+    const t=el("text",{x:W-P.r,y:y-7,"text-anchor":"end",fill:V("--warn"),"font-size":10.5,"font-weight":600,"font-family":"IBM Plex Mono, monospace"});
+    t.textContent=o.hlineLabel||"";svg.appendChild(t);}
+  o.series.forEach(s=>{
+    const pts=[];s.data.forEach((v,i)=>{if(v!=null)pts.push([o.xLog?X(xs[i]):X(i),Y(v)]);});
+    if(!pts.length)return;
+    svg.appendChild(el("path",{d:"M"+pts.map(p=>p.join(" ")).join("L"),fill:"none",stroke:s.color,
+      "stroke-width":s.w||2,"stroke-linejoin":"round","stroke-linecap":"round",
+      ...(s.dash?{"stroke-dasharray":s.dash}:{})}));
+    if(o.dots)pts.forEach(p=>{svg.appendChild(el("circle",{cx:p[0],cy:p[1],r:3.6,fill:s.color,stroke:V("--surface"),"stroke-width":2}));});
+    const lp=pts[pts.length-1];
+    if(s.label!==false){svg.appendChild(el("circle",{cx:lp[0],cy:lp[1],r:3.4,fill:s.color,stroke:V("--surface"),"stroke-width":2}));}
+  });
+  host.appendChild(svg);
+  const tip=document.createElement("div");tip.className="tip";host.appendChild(tip);
+  const hitL=el("line",{y1:P.t,y2:H-P.b,stroke:V("--ink-3"),"stroke-width":1,opacity:0});svg.appendChild(hitL);
+  const rect=el("rect",{x:P.l,y:P.t,width:W-P.l-P.r,height:H-P.t-P.b,fill:"transparent"});svg.appendChild(rect);
+  rect.addEventListener("mousemove",ev=>{
+    const bb=svg.getBoundingClientRect(),sx=(ev.clientX-bb.left)/bb.width*W;
+    let bi=0,bd=1e9;
+    xs.forEach((v,i)=>{const d=Math.abs((o.xLog?X(v):X(i))-sx);if(d<bd){bd=d;bi=i;}});
+    const px=o.xLog?X(xs[bi]):X(bi);
+    hitL.setAttribute("x1",px);hitL.setAttribute("x2",px);hitL.setAttribute("opacity",.45);
+    let h=`<span class="th">${(o.tipX||(v=>"step "+v))(xs[bi])}</span>`;
+    o.series.forEach(s=>{if(s.data[bi]==null)return;
+      h+=`<div class="tr"><span><span class="sw" style="background:${s.color}"></span>${s.name}</span><span>${(o.yFmt||fmtN)(s.data[bi])}</span></div>`;});
+    tip.innerHTML=h;tip.style.opacity=1;
+    const hb=host.getBoundingClientRect();
+    let lx=ev.clientX-hb.left+14; if(lx+tip.offsetWidth>hb.width)lx=ev.clientX-hb.left-tip.offsetWidth-14;
+    tip.style.left=lx+"px";tip.style.top=Math.max(4,ev.clientY-hb.top-tip.offsetHeight-10)+"px";
+  });
+  rect.addEventListener("mouseleave",()=>{tip.style.opacity=0;hitL.setAttribute("opacity",0);});
+}
+function defaultXTicks(n){if(n<=8)return [...Array(n).keys()];
+  const step=Math.ceil(n/7),out=[];for(let i=0;i<n;i+=step)out.push(i);
+  if(out[out.length-1]!==n-1)out.push(n-1);return out;}
+function niceTicks(a,b,log){
+  if(log){const out=[];for(let e=Math.floor(Math.log10(a));e<=Math.ceil(Math.log10(b));e++)
+    for(const m of [1,2,5]){const v=m*Math.pow(10,e);if(v>=a&&v<=b)out.push(v);}return out;}
+  const span=b-a,raw=span/5,mag=Math.pow(10,Math.floor(Math.log10(raw)));
+  const st=[1,2,2.5,5,10].map(m=>m*mag).find(m=>m>=raw)||mag*10;
+  const out=[];for(let v=Math.ceil(a/st)*st;v<=b+1e-9;v+=st)out.push(Math.round(v*1e6)/1e6);return out;}
+
+/* ---------- grouped bars ---------- */
+function barChart(host,o){
+  host.innerHTML="";
+  const W=o.w||760,H=o.h||300,P={t:16,r:16,b:o.padB||48,l:o.padL||52};
+  const svg=el("svg",{viewBox:`0 0 ${W} ${H}`,role:"img","aria-label":o.aria||"chart"});
+  const ink3=V("--ink-3"),rule=V("--rule-2");
+  const vals=o.series.flatMap(s=>s.data);
+  let y0=Math.min(0,...vals),y1=Math.max(...vals); const pd=(y1-y0)*.12||1; y1+=pd; if(y0<0)y0-=pd;
+  const Y=v=>H-P.b-(v-y0)/(y1-y0)*(H-P.t-P.b);
+  niceTicks(y0,y1).forEach(v=>{const y=Y(v);
+    svg.appendChild(el("line",{x1:P.l,x2:W-P.r,y1:y,y2:y,stroke:v===0?V("--rule"):rule,"stroke-width":1}));
+    const t=el("text",{x:P.l-9,y:y+4,"text-anchor":"end",fill:ink3,"font-size":11,"font-family":"IBM Plex Mono, monospace"});
+    t.textContent=(o.yFmt||fmtN)(v);svg.appendChild(t);});
+  const n=o.groups.length,gw=(W-P.l-P.r)/n,bw=Math.min(o.maxBar||58,(gw-18)/o.series.length);
+  o.groups.forEach((g,gi)=>{
+    const cx=P.l+gw*gi+gw/2, tot=o.series.length;
+    o.series.forEach((s,si)=>{
+      const v=s.data[gi]; if(v==null)return;
+      const x=cx-(tot*bw+ (tot-1)*2)/2 + si*(bw+2);
+      const yv=Y(v),y0p=Y(0),top=Math.min(yv,y0p),h=Math.abs(yv-y0p);
+      svg.appendChild(el("rect",{x,y:top,width:bw,height:Math.max(h,1),fill:s.color,rx:3,
+        stroke:V("--surface"),"stroke-width":2}));
+      const lt=el("text",{x:x+bw/2,y:v>=0?top-7:top+h+15,"text-anchor":"middle",fill:V("--ink"),
+        "font-size":11.5,"font-weight":600,"font-family":"IBM Plex Mono, monospace"});
+      lt.textContent=(o.lblFmt||o.yFmt||fmtN)(v);svg.appendChild(lt);
+    });
+    const t=el("text",{x:cx,y:H-P.b+20,"text-anchor":"middle",fill:V("--ink-2"),"font-size":11.5,"font-family":"IBM Plex Sans, sans-serif"});
+    t.textContent=g;svg.appendChild(t);
+    if(o.sub&&o.sub[gi]){const t2=el("text",{x:cx,y:H-P.b+35,"text-anchor":"middle",fill:ink3,"font-size":10,"font-family":"IBM Plex Mono, monospace"});
+      t2.textContent=o.sub[gi];svg.appendChild(t2);}
+  });
+  host.appendChild(svg);
+}
+function legend(id,items){
+  const n=document.getElementById(id); if(!n)return; n.innerHTML="";
+  items.forEach(it=>{const d=document.createElement("span");d.className="li";
+    d.innerHTML=`<span class="sw ${it.sq?'sq':''}" style="background:${it.color};${it.dash?'background:repeating-linear-gradient(90deg,'+it.color+' 0 5px,transparent 5px 9px)':''}"></span>${it.name}`;
+    n.appendChild(d);});
+}
+</script>
+
+
+<script>
+function guard(id,fn){try{fn();}catch(e){const n=document.getElementById(id);
+  if(n)n.innerHTML='<div style="padding:14px 16px;border:1px solid var(--crit);border-radius:5px;'
+    +'background:var(--crit-bg);color:var(--crit);font-family:\'IBM Plex Mono\',monospace;font-size:.78rem">'
+    +'chart failed: '+(e&&e.message?e.message:e)+'</div>';console.error(id,e);}}
+/* x is a real step number here, so build an explicit numeric-x line chart */
+function stepChart(host,o){
+  host.innerHTML="";
+  const W=760,H=o.h||300,P={t:14,r:16,b:38,l:56};
+  const NSl="http://www.w3.org/2000/svg";
+  const mk=(t,a)=>{const n=document.createElementNS(NSl,t);for(const k in a)n.setAttribute(k,a[k]);return n;};
+  const svg=mk("svg",{viewBox:`0 0 ${W} ${H}`,role:"img","aria-label":o.aria||"chart"});
+  const xs=o.series.flatMap(s=>s.x), ys=o.series.flatMap(s=>s.y).filter(v=>v!=null);
+  const x0=Math.min(...xs),x1=Math.max(...xs);
+  const y0=o.y0!=null?o.y0:Math.min(...ys),y1=o.y1!=null?o.y1:Math.max(...ys);
+  const X=v=>P.l+(v-x0)/(x1-x0)*(W-P.l-P.r), Y=v=>H-P.b-(v-y0)/(y1-y0)*(H-P.t-P.b);
+  (o.yTicks||[]).forEach(t=>{const y=Y(t);
+    svg.appendChild(mk("line",{x1:P.l,x2:W-P.r,y1:y,y2:y,stroke:V("--rule-2"),"stroke-width":1}));
+    const tx=mk("text",{x:P.l-9,y:y+4,"text-anchor":"end",fill:V("--ink-3"),"font-size":11,
+      "font-family":"IBM Plex Mono, monospace"});tx.textContent=o.yFmt(t);svg.appendChild(tx);});
+  (o.xTicks||[]).forEach(t=>{const x=X(t);
+    const tx=mk("text",{x,y:H-P.b+18,"text-anchor":"middle",fill:V("--ink-3"),"font-size":11,
+      "font-family":"IBM Plex Mono, monospace"});tx.textContent=t;svg.appendChild(tx);});
+  svg.appendChild(mk("line",{x1:P.l,x2:W-P.r,y1:H-P.b,y2:H-P.b,stroke:V("--rule"),"stroke-width":1}));
+  if(o.split!=null){const x=X(o.split);
+    svg.appendChild(mk("line",{x1:x,x2:x,y1:P.t,y2:H-P.b,stroke:V("--ink-3"),"stroke-width":1.5,"stroke-dasharray":"5 4"}));
+    const t=mk("text",{x:x+6,y:P.t+12,fill:V("--ink-3"),"font-size":10.5,"font-weight":600,
+      "font-family":"IBM Plex Mono, monospace"});t.textContent="Stage B starts";svg.appendChild(t);}
+  o.series.forEach(s=>{
+    const pts=s.x.map((v,i)=>[X(v),Y(s.y[i])]).filter((p,i)=>s.y[i]!=null);
+    if(!pts.length)return;
+    svg.appendChild(mk("path",{d:"M"+pts.map(p=>p.join(" ")).join("L"),fill:"none",stroke:s.color,
+      "stroke-width":s.w||2.2,"stroke-linejoin":"round","stroke-linecap":"round"}));
+    pts.forEach(p=>svg.appendChild(mk("circle",{cx:p[0],cy:p[1],r:3,fill:s.color,
+      stroke:V("--surface"),"stroke-width":1.8})));});
+  const t=mk("text",{x:W-16,y:H-4,"text-anchor":"end",fill:V("--ink-3"),"font-size":10,
+    "font-family":"IBM Plex Mono, monospace"});t.textContent=o.xLabel||"";svg.appendChild(t);
+  host.appendChild(svg);
+}
+function scatter(host,o){
+  host.innerHTML="";
+  const W=760,H=330,P={t:14,r:16,b:42,l:56};
+  const NSl="http://www.w3.org/2000/svg";
+  const mk=(t,a)=>{const n=document.createElementNS(NSl,t);for(const k in a)n.setAttribute(k,a[k]);return n;};
+  const svg=mk("svg",{viewBox:`0 0 ${W} ${H}`,role:"img","aria-label":"quality vs length"});
+  const xs=o.series.flatMap(s=>s.x), ys=o.series.flatMap(s=>s.y);
+  /* log x: free-mode lengths span 2k-10k, so a linear axis squashes the cluster */
+  const lg=v=>Math.log10(v);
+  const x0=lg(Math.min(...xs)*0.92),x1=lg(Math.max(...xs)*1.08);
+  const y0=Math.min(...ys)-0.03,y1=Math.max(...ys)+0.03;
+  const X=v=>P.l+(lg(v)-x0)/(x1-x0)*(W-P.l-P.r), Y=v=>H-P.b-(v-y0)/(y1-y0)*(H-P.t-P.b);
+  for(let t=Math.ceil(y0*10)/10;t<=y1;t+=0.1){const y=Y(t);
+    svg.appendChild(mk("line",{x1:P.l,x2:W-P.r,y1:y,y2:y,stroke:V("--rule-2"),"stroke-width":1}));
+    const tx=mk("text",{x:P.l-9,y:y+4,"text-anchor":"end",fill:V("--ink-3"),"font-size":11,
+      "font-family":"IBM Plex Mono, monospace"});tx.textContent=t.toFixed(1);svg.appendChild(tx);}
+  [2000,3000,4000,6000,8000,10000].forEach(t=>{if(lg(t)<x0||lg(t)>x1)return;const x=X(t);
+    const tx=mk("text",{x,y:H-P.b+18,"text-anchor":"middle",fill:V("--ink-3"),"font-size":11,
+      "font-family":"IBM Plex Mono, monospace"});tx.textContent=t;svg.appendChild(tx);});
+  svg.appendChild(mk("line",{x1:P.l,x2:W-P.r,y1:H-P.b,y2:H-P.b,stroke:V("--rule"),"stroke-width":1}));
+  o.series.forEach(s=>{
+    const pts=s.x.map((v,i)=>[X(v),Y(s.y[i])]);
+    svg.appendChild(mk("path",{d:"M"+pts.map(p=>p.join(" ")).join("L"),fill:"none",stroke:s.color,
+      "stroke-width":1.6,"stroke-linejoin":"round",opacity:s.dash?0.55:0.9,
+      ...(s.dash?{"stroke-dasharray":"4 4"}:{})}));
+    pts.forEach((p,i)=>svg.appendChild(mk("circle",{cx:p[0],cy:p[1],r:i===pts.length-1?5:2.6,
+      fill:s.color,stroke:V("--surface"),"stroke-width":1.8})));});
+  const t=mk("text",{x:W-16,y:H-6,"text-anchor":"end",fill:V("--ink-3"),"font-size":10,
+    "font-family":"IBM Plex Mono, monospace"});t.textContent="free-mode tokens →";svg.appendChild(t);
+  host.appendChild(svg);
+}
+function renderAll(){
+  const S1=V("--s1"),S2=V("--s2"),S3=V("--s3"),A=D.A,B=D.B;
+  guard("fig-ratio",()=>{
+    legend("lg-ratio",[{name:"Stage A",color:S1},{name:"Stage B",color:S2},{name:"perfect (1.00×)",color:V("--good"),dash:1}]);
+    stepChart(document.getElementById("fig-ratio"),{
+      y0:0.3,y1:1.10,yTicks:[0.4,0.6,0.8,1.0],yFmt:v=>v.toFixed(1)+"×",split:D.split,
+      xTicks:[0,120,240,360,482,600,720,817],xLabel:"training step (Stage A then Stage B)",
+      series:[{x:A.x,y:A.ratio,color:S1},{x:B.x,y:B.ratio,color:S2}]});
+  });
+  guard("fig-corr",()=>{
+    legend("lg-corr",[{name:"Stage A",color:S1},{name:"Stage B",color:S2}]);
+    stepChart(document.getElementById("fig-corr"),{
+      y0:-0.1,y1:1.0,yTicks:[0,0.25,0.5,0.75,1.0],yFmt:v=>v.toFixed(2),split:D.split,
+      xTicks:[0,120,240,360,482,600,720,817],xLabel:"training step",
+      series:[{x:A.x,y:A.corr,color:S1},{x:B.x,y:B.corr,color:S2}]});
+  });
+  guard("fig-free",()=>{
+    const F=D.free;
+    legend("lg-free",[{name:"chat",color:S2},{name:"ifeval",color:S3},{name:"math",color:S1},
+                      {name:"Stage A (faded)",color:V("--ink-3"),dash:1}]);
+    scatter(document.getElementById("fig-free"),{series:[
+      {x:F.A_chat.len,y:F.A_chat.acc,color:S2,dash:1},{x:F.B_chat.len,y:F.B_chat.acc,color:S2},
+      {x:F.A_ifeval.len,y:F.A_ifeval.acc,color:S3,dash:1},{x:F.B_ifeval.len,y:F.B_ifeval.acc,color:S3},
+      {x:F.A_math.len,y:F.A_math.acc,color:S1,dash:1},{x:F.B_math.len,y:F.B_math.acc,color:S1}]});
+  });
+}
+renderAll();
+matchMedia("(prefers-color-scheme: dark)").addEventListener("change",renderAll);
+new MutationObserver(renderAll).observe(document.documentElement,{attributes:true,attributeFilter:["data-theme"]});
+let rt;addEventListener("resize",()=>{clearTimeout(rt);rt=setTimeout(renderAll,180);});
+</script>
