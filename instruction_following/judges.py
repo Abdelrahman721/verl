@@ -29,7 +29,7 @@ def call_deepseek(
 
     Returns the full chat completion response, or ``None`` if no API key or all attempts fail.
     """
-    api_key = os.environ.get("DEEPSEEK_API_KEY")
+    api_key = os.environ.get("OPENROUTER_API_KEY")
     if not api_key:
         return None
     try:
@@ -37,7 +37,7 @@ def call_deepseek(
     except ImportError:
         return None
 
-    client = OpenAI(api_key=api_key, base_url=_DEEPSEEK_BASE)
+    client = OpenAI(api_key=api_key, base_url="https://openrouter.ai/api/v1")
 
     if user_message is not None:
         messages = []
@@ -52,12 +52,26 @@ def call_deepseek(
     for attempt in range(1, max_retries + 1):
         try:
             response = client.chat.completions.create(
-                model=_DEEPSEEK_MODEL,
+                model="deepseek/deepseek-v3.2",
                 messages=messages,
+                temperature=1.0,
+                extra_body={
+                    "max_length": 130000,
+                    "reasoning_effort": "high",
+                    "id": "gemini-mlentry-007708-1",
+                    "provider": {
+                        "ignore": [
+                            "atlas-cloud/fast",
+                            "friendli",
+                            "google-vertex",
+                            "alibaba",
+                        ]
+                    }
+                },
             )
             return response
         except Exception as e:
-            print(f"DeepSeek API error (attempt {attempt}/{max_retries}): {e}")
+            print(f"OpenRouter API error (attempt {attempt}/{max_retries}): {e}")
             if attempt < max_retries:
                 time.sleep(2**attempt)
 

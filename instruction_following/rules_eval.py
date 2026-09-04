@@ -428,8 +428,7 @@ def eval_v15_description_from_code(
     text = get_answer_text(response)
     labels = get_labels(labels_path)
     if len(original_codes) != 1:
-        raise ValueError("eval_v15_description_from_code requires exactly one original code")
-   
+        return EvalResult(None, 0.0, None)
     code_id = str(original_codes[0])
     gold_desc = labels[code_id]
     answer_cf = normalize_for_desc_match(text).casefold()

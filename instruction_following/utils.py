@@ -9,11 +9,10 @@ import re
 import sys
 from pathlib import Path
 
-# verl repo root = parent of `instruction_following/`; sibling repo is `mcs-instruct-dataset`.
-_VERL_REPO_ROOT = Path(__file__).resolve().parents[1]
-_DEFAULT_LABELS = (
-    _VERL_REPO_ROOT.parent / "mcs-instruct-dataset" / "datasets" / "set_B1_sct_id_labels.csv"
-)
+# Repo layout: .../repos/llm-eval/instruction_following/utils.py -> parents[2] == repos
+_REPOS_ROOT = Path(__file__).resolve().parents[2]
+_MCS_DATASET_ROOT = _REPOS_ROOT / "mcs-instruct-dataset"
+_DEFAULT_LABELS = _MCS_DATASET_ROOT / "datasets" / "set_B1_sct_id_labels.csv"
 
 
 def default_labels_path() -> Path:
@@ -26,11 +25,12 @@ _SCT_ID_PATTERN = re.compile(r"\b(\d{6,18})\b")
 
 
 def get_answer_text(response: str) -> str:
-    """Prefer content inside <answer>...</answer> if present (completion format)."""
-    m = re.search(r"<answer>(.*?)</answer>", response, re.DOTALL | re.IGNORECASE)
-    if m:
-        return m.group(1).strip()
-    return response
+    """Take everything after the last </think> tag (matches evaluate_mlsnomed_sft)."""
+    text = response or ""
+    matches = list(re.finditer(r"</think>", text, flags=re.IGNORECASE))
+    if not matches:
+        return text.strip()
+    return text[matches[-1].end() :].strip()
 
 
 def extract_sct_ids(text: str) -> set[str]:
@@ -69,14 +69,27 @@ def normalize_for_desc_match(text: str) -> str:
 
 
 def load_labels(labels_path: Path | None = None) -> dict[str, str]:
-    """Load sct_id -> description from set_B1 CSV."""
+    """Load sct_id -> description from CSV or JSON mapping file."""
     path = labels_path or default_labels_path()
     if not path.exists():
         raise FileNotFoundError(
             f"Labels file not found: {path}. Set INSTRUCTION_FOLLOWING_LABELS_CSV or place "
-            "mcs-instruct-dataset next to the verl repo, or set INSTRUCTION_FOLLOWING_LABELS_CSV."
+            "mcs-instruct-dataset next to llm-eval."
         )
     out: dict[str, str] = {}
+
+    if path.suffix.lower() == ".json":
+        with path.open("r", encoding="utf-8") as f:
+            data = json.load(f)
+        if not isinstance(data, dict):
+            raise ValueError(f"Labels JSON must be an object mapping sct_id -> label. Got: {type(data).__name__}")
+        for sid, label in data.items():
+            sid_s = str(sid).strip()
+            label_s = str(label).strip()
+            if sid_s and label_s:
+                out[sid_s] = label_s
+        return out
+
     with path.open(newline="", encoding="utf-8") as f:
         reader = csv.DictReader(f)
         for row in reader:
@@ -99,7 +112,7 @@ def get_labels(labels_path: Path | None = None) -> dict[str, str]:
 
 def import_hierarchy_get_ancestors():
     """Lazy import of get_all_ancestor_ids from mcs-instruct-dataset."""
-    root = str(_VERL_REPO_ROOT.parent / "mcs-instruct-dataset")
+    root = str(_MCS_DATASET_ROOT)
     if root not in sys.path:
         sys.path.insert(0, root)
     from domain.snomed.hierarchy import get_all_ancestor_ids  # noqa: PLC0415
