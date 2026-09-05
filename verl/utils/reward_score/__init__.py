@@ -60,6 +60,12 @@ def default_compute_score(
         from . import sct_multilabel
 
         res = sct_multilabel.compute_score(solution_str, ground_truth)
+    elif data_source == "nemotron_pivot":
+        # Single-step tool-use RL (examples/data_preprocess/nemotron_pivot_preprocess.py):
+        # the policy's action vs the expert's expected_action, Gym comparator semantics.
+        from . import nemotron_pivot
+
+        res = nemotron_pivot.compute_score(solution_str, ground_truth, extra_info=extra_info)
     elif data_source == "sct_if":
         # SNOMED instruction-following (combined RL / IF JSONL → sct_if_preprocess parquet).
         from . import sct_if
