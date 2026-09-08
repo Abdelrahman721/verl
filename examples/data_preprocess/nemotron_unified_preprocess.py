@@ -18,8 +18,7 @@ patched). Tools are baked into the system message with the same tools block, ver
 `--check_render` against the tokenizer's tools kwarg on rows from BOTH sources.
 
 --balance (default on) equalises three buckets by count:
-    prose     : expected message, from BOTH sources by default (--prose_sources pivot|sft narrows it;
-                the sft pool is ~24x larger, so "both" is ~96% sft prose)
+    prose     : expected message, from the pivot rows ONLY (--prose_sources both|sft widens it)
     single    : expected single call, from the pivot rows ONLY (sft single-call turns are dropped)
     parallel  : expected batch of 2+ calls, from the sft rows (the pivot set has none)
 The smallest bucket is taken whole; the other two are sampled without replacement to the same
@@ -98,9 +97,9 @@ def parse_args():
     p.add_argument("--reasoning", choices=["all", "official"], default="all")
     p.add_argument("--balance", action=argparse.BooleanOptionalAction, default=True,
                    help="Equalise prose / single(pivot only) / parallel(sft) buckets (default on)")
-    p.add_argument("--prose_sources", choices=["both", "pivot", "sft"], default="both",
-                   help="Where the prose bucket is drawn from when balancing (default both; note the sft "
-                        "pool is ~24x the pivot pool, so 'both' is ~96%% sft prose)")
+    p.add_argument("--prose_sources", choices=["pivot", "both", "sft"], default="pivot",
+                   help="Where the prose bucket is drawn from when balancing (default pivot: the RL source only; "
+                        "'both' would be ~96%% sft prose because that pool is ~24x larger)")
     p.add_argument("--val_trajectories", type=int, default=1000)
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--limit_pivot", type=int, default=None, help="Smoke test: first N pivot rows")
