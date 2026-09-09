@@ -1,5 +1,14 @@
 set -x
 
+# JUDGE VARIANT of nemotron_pivot_grpo.sh. Identical except for the reward:
+#   * expected tool call -> unchanged rule reward (verl/utils/reward_score/nemotron_pivot.py)
+#   * expected prose     -> parsable tool call scores 0.0 without a judge call; otherwise
+#                           minimax/minimax-m3 grades the reply against the experts, given
+#                           the last user message, as 1 or 0.
+# Requires OPENROUTER_API_KEY in the environment. dev/dev.sh forwards no env vars, so
+# export it inside the container before running this.
+
+
 # GRPO on nvidia/Nemotron-RL-Agentic-Conversational-Tool-Use-Pivot-v1: one decision step per row,
 # reward = policy action vs expert action (verl/utils/reward_score/nemotron_pivot.py).
 # Parquets from examples/data_preprocess/nemotron_pivot_preprocess.py (data_source=nemotron_pivot).
@@ -18,7 +27,7 @@ TRAIN_FILES="/workspace/verl/rl-data/nemotron_pivot/nemotron_pivot_all_train.par
 VAL_FILES="/workspace/verl/rl-data/nemotron_pivot/nemotron_pivot_all_val.parquet"
 
 PROJECT_NAME="RL-Exps"
-EXP_NAME="grpo_nemotron_pivot_all"            # CHANGED
+EXP_NAME="grpo_nemotron_pivot_v2"                 # CHANGED: v2 reward (lenient prose judge + call-count gate)
 
 # CHANGED: prompts are p99 7.3k / max 10.8k tokens (policy + ~17 tool schemas + history). 4096 would
 # discard a third of the corpus via filter_overlong_prompts. 12288 keeps every row.
@@ -46,6 +55,8 @@ ROLLOUT_IS_THRESHOLD=2.0
 FILTER_METRIC="seq_reward"
 MAX_NUM_GEN_BATCHES=10
 
+: "${OPENROUTER_API_KEY:?export OPENROUTER_API_KEY before running the judge variant}"
+
 python3 -m verl.trainer.main_ppo \
   algorithm.adv_estimator=grpo \
   \
@@ -56,6 +67,9 @@ python3 -m verl.trainer.main_ppo \
   data.max_prompt_length="${MAX_PROMPT_LEN}" \
   data.max_response_length="${MAX_RESPONSE_LEN}" \
   data.filter_overlong_prompts=True \
+  reward.reward_manager.source=importlib \
+  reward.reward_manager.name=NemotronJudgeRewardManager \
+  reward.reward_manager.module.path=verl/workers/reward_manager/nemotron_judge.py \
   data.filter_overlong_prompts_workers=16 \
   data.truncation='error' \
   \
@@ -112,6 +126,6 @@ python3 -m verl.trainer.main_ppo \
   trainer.save_freq=50 \
   trainer.test_freq=50 \
   trainer.total_epochs=1 \
-  trainer.rollout_data_dir=/workspace/verl/verl_dumps/rollouts_nemotron_pivot \
-  trainer.validation_data_dir=/workspace/verl/verl_dumps/val_nemotron_pivot \
+  trainer.rollout_data_dir=/workspace/verl/verl_dumps/rollouts_nemotron_pivot_v2 \
+  trainer.validation_data_dir=/workspace/verl/verl_dumps/val_nemotron_pivot_v2 \
   "$@"

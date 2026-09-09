@@ -1,5 +1,38 @@
 set -x
 
+# UNIFIED-CORPUS RUN (v3). Data: rl-data/nemotron_unified, balanced 33/33/33 across
+# prose / single-call / parallel-call ground truths (88,041 train, 1,206 val).
+#
+# Reward (verl/utils/reward_score/nemotron_pivot_judge.py), all on [-1, 1]:
+#   * prose rows  -> LLM judge (minimax-m3) asks ONLY whether the reply is coherent prose
+#                    addressing the last user message; the gold is not shown. Pass +1,
+#                    fail -1. Emitting a tool call here is -1 without a judge call.
+#   * tool rows   -> emitted calls matched to ground-truth calls BY NAME with multiplicity.
+#                    Matched call contributes its argument-level score in [-1, 1]; every
+#                    extra call and every expected-but-unmade call contributes -1;
+#                    divided by the ground-truth call count and clamped.
+#
+# Differences from the v2 run, all deliberate:
+#   - the hard "call count must match exactly" gate is gone; under-/over-calling is now
+#     graded on a slope, because half the tool rows here need 2+ calls and the gate made
+#     "4 of 5 correct" score exactly what prose scored.
+#   - zero-argument tools score +1 when called correctly (they scored 0.0 before; 2.3% of
+#     calls in this corpus take no arguments).
+#   - prose maps to +1/-1 rather than 1/0, so both halves share one scale. With
+#     norm_adv_by_std_in_grpo=False that keeps GRPO advantages comparable across row types.
+#
+# Requires OPENROUTER_API_KEY. dev/dev.sh forwards no env vars, so export it in the
+# container before running this.
+
+# JUDGE VARIANT of nemotron_pivot_grpo.sh. Identical except for the reward:
+#   * expected tool call -> unchanged rule reward (verl/utils/reward_score/nemotron_pivot.py)
+#   * expected prose     -> parsable tool call scores 0.0 without a judge call; otherwise
+#                           minimax/minimax-m3 grades the reply against the experts, given
+#                           the last user message, as 1 or 0.
+# Requires OPENROUTER_API_KEY in the environment. dev/dev.sh forwards no env vars, so
+# export it inside the container before running this.
+
+
 # GRPO on nvidia/Nemotron-RL-Agentic-Conversational-Tool-Use-Pivot-v1: one decision step per row,
 # reward = policy action vs expert action (verl/utils/reward_score/nemotron_pivot.py).
 # Parquets from examples/data_preprocess/nemotron_pivot_preprocess.py (data_source=nemotron_pivot).
@@ -14,11 +47,11 @@ set -x
 # This checkpoint's tokenizer_config.json carries that tooling template; the official Qwen3 template
 # it shipped with is preserved at tokenizer_config.json.pre-tooling-template.bak.
 MODEL_PATH="models/Qwen3-4B-Base-sft-3850"
-TRAIN_FILES="/workspace/verl/rl-data/nemotron_pivot/nemotron_pivot_all_train.parquet"
-VAL_FILES="/workspace/verl/rl-data/nemotron_pivot/nemotron_pivot_all_val.parquet"
+TRAIN_FILES="/workspace/verl/rl-data/nemotron_unified/nemotron_unified_balanced_all_train.parquet"
+VAL_FILES="/workspace/verl/rl-data/nemotron_unified/nemotron_unified_balanced_all_val.parquet"
 
 PROJECT_NAME="RL-Exps"
-EXP_NAME="grpo_nemotron_pivot_all"            # CHANGED
+EXP_NAME="grpo_nemotron_unified_v3"               # CHANGED: unified balanced corpus + v3 reward
 
 # CHANGED: prompts are p99 7.3k / max 10.8k tokens (policy + ~17 tool schemas + history). 4096 would
 # discard a third of the corpus via filter_overlong_prompts. 12288 keeps every row.
@@ -46,6 +79,8 @@ ROLLOUT_IS_THRESHOLD=2.0
 FILTER_METRIC="seq_reward"
 MAX_NUM_GEN_BATCHES=10
 
+: "${OPENROUTER_API_KEY:?export OPENROUTER_API_KEY before running the judge variant}"
+
 python3 -m verl.trainer.main_ppo \
   algorithm.adv_estimator=grpo \
   \
@@ -56,6 +91,9 @@ python3 -m verl.trainer.main_ppo \
   data.max_prompt_length="${MAX_PROMPT_LEN}" \
   data.max_response_length="${MAX_RESPONSE_LEN}" \
   data.filter_overlong_prompts=True \
+  reward.reward_manager.source=importlib \
+  reward.reward_manager.name=NemotronJudgeRewardManager \
+  reward.reward_manager.module.path=verl/workers/reward_manager/nemotron_judge.py \
   data.filter_overlong_prompts_workers=16 \
   data.truncation='error' \
   \
@@ -112,6 +150,6 @@ python3 -m verl.trainer.main_ppo \
   trainer.save_freq=50 \
   trainer.test_freq=50 \
   trainer.total_epochs=1 \
-  trainer.rollout_data_dir=/workspace/verl/verl_dumps/rollouts_nemotron_pivot \
-  trainer.validation_data_dir=/workspace/verl/verl_dumps/val_nemotron_pivot \
+  trainer.rollout_data_dir=/workspace/verl/verl_dumps/rollouts_nemotron_unified_v3 \
+  trainer.validation_data_dir=/workspace/verl/verl_dumps/val_nemotron_unified_v3 \
   "$@"
