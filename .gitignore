@@ -138,3 +138,9 @@ full_mix/secrets.env
 
 .claude
 full_mix/runtime_env.yaml
+
+#additional
+**refusal**
+
+# qlcm — the single env/secrets file, never commit
+qlcm/runtime_env.yaml

@@ -1,0 +1,69 @@
+# Ray runtime_env for QLCM training jobs.  Copy to qlcm/runtime_env.yaml and
+# fill in the keys — qlcm/runtime_env.yaml is gitignored.
+#
+# NO working_dir — the repo is identity-mounted at the same path on every node
+# (via DATA_MOUNTS in dev/dev.sh), so there's nothing to upload.
+#
+# Use with:
+#   ray job submit --runtime-env=qlcm/runtime_env.yaml \
+#     -- bash -c "cd /workspace/verl && bash qlcm/run_pipeline.sh"
+#
+# NOTE: on 200+ CPU hosts, pass --num-cpus explicitly to `ray start` or the
+# second job submission will hang and take the head raylet with it.
+
+env_vars:
+  TOKENIZERS_PARALLELISM: "true"
+  NCCL_DEBUG: "WARN"
+  VLLM_LOGGING_LEVEL: "WARN"
+  CUDA_DEVICE_MAX_CONNECTIONS: "1"
+  TORCH_NCCL_AVOID_RECORD_STREAMS: "1"
+  PYTORCH_ALLOC_CONF: "expandable_segments:True"
+  VLLM_DISABLE_COMPILE_CACHE: "1"
+  VLLM_USE_V1: "1"
+
+  # ---- general judge (chat / safety / identity) ----
+  QLCM_JUDGE_API_BASE: "https://openrouter.ai/api/v1"
+  QLCM_JUDGE_MODEL: "deepseek/deepseek-v4-flash-0731"
+  # Global identity gate: one extra judge call per non-identity sample.
+  # OFF — it was the dominant source of judge failures (see README).
+  # Set to "1" to re-enable.
+  QLCM_IDENTITY_GATE: "0"
+  QLCM_IDENTITY_JUDGE_MODEL: "deepseek/deepseek-v4-flash-0731"
+  QLCM_JUDGE_DISABLE_THINKING: "0"
+  QLCM_JUDGE_MAX_RETRIES: "3"
+  QLCM_JUDGE_CONCURRENCY: "32"
+  QLCM_JUDGE_TIMEOUT: "240"
+  QLCM_JUDGE_MAX_TOKENS: "16384"
+  QLCM_JUDGE_FORCE_JSON: "1"
+  QLCM_JUDGE_DISABLE_REASONING: "0"
+  QLCM_JUDGE_TEMPERATURE: "0.6"
+  # Pinned provider pool — rationale is in the judge block of any train_*.sh.
+  # require_parameters MUST be 0: baseten does not implement response_format
+  # and the request 404s with it on.
+  QLCM_JUDGE_PROVIDER_ONLY: "together,novita,makora,baseten,baidu,deepinfra"
+  QLCM_JUDGE_PROVIDER_ORDER: "together,novita,makora,baseten,baidu,deepinfra"
+  QLCM_JUDGE_REQUIRE_PARAMETERS: "0"
+  QLCM_JUDGE_API_KEY: "REPLACE_ME"
+
+  # ---- medical QA judge ----
+  # ---- response length cost (qlcm/rewards/length_penalty.py) ----
+  # Linear cost on total words (think + answer): every 1,000 words costs this
+  # much reward. No threshold and no cap — with GRPO's mean-subtracted
+  # advantage the group's own mean length is the reference, so the pressure is
+  # per-prompt adaptive and never has a flat region. Calibrated on the 39,678
+  # stage-1 rollouts from steps 280-373: 0.25x the within-group task spread.
+  # Set ENABLE to 0 to switch it off.
+  QLCM_LEN_PENALTY_ENABLE: "1"
+  QLCM_LEN_COST_PER_1K_WORDS: "0.07"
+
+  QA_JUDGE_MODEL: "openai/gpt-5.4-mini"
+  QA_JUDGE_MAX_TOKENS: "32768"
+  QA_JUDGE_OPENROUTER_API_KEY: "REPLACE_ME"
+
+  # ---- coding instruction-following judge ----
+  IF_USE_LLM_JUDGES: "1"
+  INSTRUCTION_FOLLOWING_LABELS_CSV: "/data/abdelrahman/verl/qlcm/rewards/coding/instruction_following/labels/all_codes_to_descriptions_reconciled.json"
+  OPENROUTER_API_KEY: "REPLACE_ME"
+
+  CHAT_VARIANT: "chat_with_baseline"
+  WANDB_API_KEY: "REPLACE_ME"
