@@ -16,17 +16,21 @@
 #   a  LCPO-Exact  reward = task - alpha*|budget - n_think|
 #   b  LCPO-Max    reward = task * clip(alpha*(budget - n_think) + delta, 0, 1)
 #
-# Stage b starts FROM a stage-a checkpoint (pass MODEL_PATH). Ship only stage b:
-# stage a punishes coming in UNDER budget too, which fights "bigger budget,
-# better results".
+# Ship only stage b: stage a punishes coming in UNDER budget too, which fights
+# "bigger budget, better results". The defaults below run stage b straight from
+# the dual-mode SFT model on the BUCKETIZED mix (budgets on a 256-token grid,
+# 256..6144); pass MODEL_PATH=<stage-a ckpt> to start from a stage-a run instead.
 #
-#   LCPO_STAGE=a bash full_mix/train_lcpo_grpo.sh
-#   LCPO_STAGE=b MODEL_PATH=<stage-a ckpt> bash full_mix/train_lcpo_grpo.sh
+#   bash full_mix/train_lcpo_grpo.sh                                    # stage b
+#   LCPO_STAGE=a DATA_DIR=.../lcpo_mix_bucket VAL_DIR=.../lcpo_val_bucket \
+#     bash full_mix/train_lcpo_grpo.sh                                  # stage a
 #
 # Forked from full_mix/train_sync_chat_ifeval.sh, keeping its execution model:
 # all 8 GPUs are shared, vLLM generates, sleeps, the actor trains, weights
 # reload, repeat. No overlap, no staleness, every batch on-policy. Only the
-# model, the data and the reward differ.
+# model, the data and the reward differ. Runs on THIS machine only: it starts a
+# private single-node Ray instance instead of joining the shared multi-node
+# cluster that is usually up in the container (see the Ray section).
 #
 # Run INSIDE the container started by dev/dev.sh:
 #   bash dev/dev.sh
@@ -49,20 +53,31 @@ _REPO_ROOT_DIR="$(dirname "$_FM_DIR")"
 export PYTHONPATH="${_REPO_ROOT_DIR}${PYTHONPATH:+:${PYTHONPATH}}"
 
 # ---- model ----
-MODEL_PATH=${MODEL_PATH:-/workspace/verl/checkpoints/RL-Exps/lcpo-budget-sync-4b-3-stagea/global_step_480/merged_hf_model}
+# The dual-mode SFT model, i.e. stage b with no stage-a run in front of it (the
+# stage-a checkpoint this used to point at is not on this host). A host path
+# rather than /workspace: dev/dev.sh bind-mounts /data/abdelrahman at the same
+# path inside the container.
+MODEL_PATH=${MODEL_PATH:-/data/abdelrahman/qwen-sft/full_scale/out-qwen3-4b/dual-mode-sft-tagged}
 
 
 # ---- data ----
-# Stage b reads the REPHRASED mix: "Think for a maximum of N tokens." instead of
+# BUCKETIZED mix: every budget sits on the 256-token grid {256, 512, ..., 6144}
+# (24 values, ~600 rows each) instead of being a fresh integer from [200, 6000],
+# so each budget recurs hundreds of times and the val ladder sits on the same
+# grid. Built by full_mix/lcpo/bucketize_budgets.py from lcpo_mix / lcpo_val:
+# prompts, modes, row order and uids are bit-identical to the originals, only
+# the number in the budget sentence moved. See <dir>/_bucketize_report.json.
+#
+# Stage b reads the REPHRASED copy: "Think for a maximum of N tokens." instead of
 # "Think for N tokens.", because stage b enforces a ceiling and stage a enforced
 # a target. Without the wording change the model cannot tell the two rules apart
 # and stage b just overwrites stage a's behaviour on byte-identical prompts.
-# Built by full_mix/lcpo/rephrase_budget_prompts.py, which rewrites that one
-# sentence and leaves every prompt, budget, mode and uid otherwise bit-identical
-# so the two runs stay comparable. Point these back at lcpo_mix / lcpo_val for
-# stage a.
-DATA_DIR=${DATA_DIR:-/workspace/verl/data/lcpo_mix_max}
-VAL_DIR=${VAL_DIR:-/workspace/verl/data/lcpo_val_max}
+# full_mix/lcpo/rephrase_budget_prompts.py makes each _max copy from its vanilla
+# sibling. Point these at lcpo_mix_bucket / lcpo_val_bucket for stage a, or at
+# lcpo_mix_max / lcpo_val_max for the un-bucketized data (whose val rungs are
+# named differently — see VAL_FILES).
+DATA_DIR=${DATA_DIR:-/workspace/verl/data/lcpo_mix_bucket_max}
+VAL_DIR=${VAL_DIR:-/workspace/verl/data/lcpo_val_bucket_max}
 
 CHAT_VARIANT=${CHAT_VARIANT:-chat_with_baseline}
 case "$CHAT_VARIANT" in
@@ -78,13 +93,19 @@ esac
 TRAIN_FILES=${TRAIN_FILES:-"[${DATA_DIR}/${_CHAT_FILE},${DATA_DIR}/ifeval_train.parquet,${DATA_DIR}/math_train.parquet]"}
 # The budget ladder: 6 fixed rungs + unconstrained + zero, so the
 # score-vs-budget curve and both retention checks come out of every validation.
-# Built by full_mix/lcpo/build_val_ladder.py.
-VAL_FILES=${VAL_FILES:-"[${VAL_DIR}/val_budget_00256.parquet,${VAL_DIR}/val_budget_00512.parquet,${VAL_DIR}/val_budget_01024.parquet,${VAL_DIR}/val_budget_02048.parquet,${VAL_DIR}/val_budget_04000.parquet,${VAL_DIR}/val_budget_06000.parquet,${VAL_DIR}/val_free.parquet,${VAL_DIR}/val_nothink.parquet]"}
+# Built by full_mix/lcpo/build_val_ladder.py, then snapped onto the grid by
+# bucketize_budgets.py: the 4000 and 6000 rungs became 4096 and 6144, so the top
+# rung still equals the largest trained budget. The un-bucketized lcpo_val*
+# directories keep the old file names — override VAL_FILES to point at them.
+VAL_FILES=${VAL_FILES:-"[${VAL_DIR}/val_budget_00256.parquet,${VAL_DIR}/val_budget_00512.parquet,${VAL_DIR}/val_budget_01024.parquet,${VAL_DIR}/val_budget_02048.parquet,${VAL_DIR}/val_budget_04096.parquet,${VAL_DIR}/val_budget_06144.parquet,${VAL_DIR}/val_free.parquet,${VAL_DIR}/val_nothink.parquet]"}
 
 
 # ---- experiment metadata ----
 PROJECT_NAME=${PROJECT_NAME:-RL-Exps}
-EXP_NAME=${EXP_NAME:-lcpo-budget-sync-4b-3-stage${LCPO_STAGE:-b}}
+# A new name for the bucketized run: checkpoints land in
+# checkpoints/<project>/<exp>, so reusing an earlier run's name would write into
+# its directory.
+EXP_NAME=${EXP_NAME:-lcpo-budget-sync-4b-bucket-stage${LCPO_STAGE:-b}}
 
 
 # ---- sequence lengths ----
@@ -124,7 +145,7 @@ LOSS_AGG_MODE=${LOSS_AGG_MODE:-token-mean}
 # ---- overlong buffer ----
 # OFF for LCPO. It adds its penalty AFTER the score, so on top of stage b's
 # multiplied reward it would drive the reward negative exactly where stage b
-# already intends zero. With budgets capped at 6000 it would rarely fire anyway.
+# already intends zero. With budgets capped at 6144 it would rarely fire anyway.
 ENABLE_OVERLONG_BUFFER=${ENABLE_OVERLONG_BUFFER:-False}
 OVERLONG_BUFFER_LEN=${OVERLONG_BUFFER_LEN:-1024}
 OVERLONG_PENALTY_FACTOR=${OVERLONG_PENALTY_FACTOR:-1.0}
@@ -236,7 +257,7 @@ LCPO_ALPHA_CHAT=${LCPO_ALPHA_CHAT:-0.00035}
 # next generation. TRAIN_MINI_BSZ splits that into optimizer steps:
 #   64 / 32 = 2 optimizer steps per generation, matching the async script's
 #   2 steps per parameter sync.
-# 5996 prompts / 64 => ~93 steps per epoch.
+# 24000 rows / 64 => 375 steps per epoch, 750 over the 2 epochs below.
 TRAIN_BATCH_SIZE=${TRAIN_BATCH_SIZE:-64}
 TRAIN_MINI_BSZ=${TRAIN_MINI_BSZ:-32}
 TOTAL_EPOCHS=${TOTAL_EPOCHS:-2}
@@ -254,7 +275,7 @@ fi
 
 
 # ---- rollout / validation dump dirs ----
-DUMP_ROOT=${DUMP_ROOT:-/workspace/verl/dumps/lcpo_budget_sync_new_alphas}
+DUMP_ROOT=${DUMP_ROOT:-/workspace/verl/dumps/lcpo_budget_sync_bucket}
 ROLLOUT_DATA_DIR=${ROLLOUT_DATA_DIR:-${DUMP_ROOT}/rollouts}
 VALIDATION_DATA_DIR=${VALIDATION_DATA_DIR:-${DUMP_ROOT}/val}
 
@@ -262,6 +283,28 @@ VALIDATION_DATA_DIR=${VALIDATION_DATA_DIR:-${DUMP_ROOT}/val}
 # ---- cluster layout (colocate: ALL GPUs run both rollout and training) ----
 NNODES=${NNODES:-1}
 NGPUS_PER_NODE=${NGPUS_PER_NODE:-8}
+
+
+# ---- Ray: a private single-node instance, NOT the shared cluster ----
+# The container usually has the multi-node cluster up (head .31 + worker .32 on
+# port 6379, left from the fully_async runs). ray.init() with no address joins
+# whatever /tmp/ray/ray_current_cluster names, and verl's placement group then
+# puts its 8 GPUs on WHICHEVER node has them free — .32 as readily as this one.
+# address=local starts a private instance on this host instead, on its own ports
+# (measured 2026-09-15: GCS on :45421, dashboard fell back to :8266), so the
+# shared cluster is neither joined nor touched and ray_current_cluster still
+# names it afterwards.
+# num_cpus is a scheduling budget, not a core count. Left unset on these
+# 208-core boxes Ray sizes its agents off os.cpu_count(), which is what hangs the
+# runtime-env agent and takes the raylet down with it; 64 is what the shared head
+# was started with. Set RAY_ADDRESS_MODE=auto to join an existing cluster instead
+# (num_cpus is then not passed: Ray refuses it when connecting to a live cluster).
+RAY_ADDRESS_MODE=${RAY_ADDRESS_MODE:-local}
+RAY_NUM_CPUS=${RAY_NUM_CPUS:-64}
+_RAY_FLAGS=("+ray_kwargs.ray_init.address=${RAY_ADDRESS_MODE}")
+if [[ "${RAY_ADDRESS_MODE}" == "local" ]]; then
+  _RAY_FLAGS+=("ray_kwargs.ray_init.num_cpus=${RAY_NUM_CPUS}")
+fi
 
 
 # ---- parallelism ----
@@ -383,6 +426,24 @@ case "${LCPO_STAGE}" in
   a|b) ;;
   *) echo "LCPO_STAGE must be 'a' (Exact) or 'b' (Max); got '${LCPO_STAGE}'" >&2; exit 2 ;;
 esac
+
+# Every GPU on this box must be free. Colocate puts vLLM at GPU_MEM_UTIL of each
+# card AND gathers FSDP params on the same card, so a GPU some other job is
+# holding does not fail fast: the model loads for minutes, then the vLLM engine
+# OOMs. Check up front and name the culprits (2026-09-15: two vLLM servers from
+# another container held 75 GB on all 8 GPUs). SKIP_GPU_PREFLIGHT=1 bypasses it.
+if [[ "${SKIP_GPU_PREFLIGHT:-0}" != "1" ]]; then
+  _busy=$(nvidia-smi --query-gpu=index,memory.used --format=csv,noheader,nounits \
+            | head -n "${NGPUS_PER_NODE}" \
+            | awk -F', *' '$2 > 4096 {printf "gpu%s=%sMiB ", $1, $2}')
+  if [[ -n "${_busy}" ]]; then
+    echo "[preflight] GPUs already hold memory: ${_busy}" >&2
+    nvidia-smi --query-compute-apps=gpu_uuid,pid,process_name,used_memory --format=csv >&2 || true
+    echo "[preflight] Free them (or SKIP_GPU_PREFLIGHT=1 to launch anyway) first." >&2
+    exit 2
+  fi
+  echo "[preflight] all ${NGPUS_PER_NODE} GPUs are free: OK"
+fi
 
 # The checkpoint's chat_template.jinja is load-bearing and has been silently
 # clobbered before: evaluation-lm/run.sh copies its own template over it and
@@ -527,5 +588,6 @@ python3 -m full_mix.main_ppo \
   trainer.validation_data_dir="${VALIDATION_DATA_DIR}" \
   trainer.total_epochs="${TOTAL_EPOCHS}" \
   trainer.test_freq="${TEST_FREQ}" \
+  "${_RAY_FLAGS[@]}" \
   ${RAY_ENV_FLAGS:-} \
   "$@"
