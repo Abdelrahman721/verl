@@ -19,6 +19,8 @@ reply in prose. The ground truth is the expert's action at that step:
 | `nemotron_pivot_grpo.sh` | `grpo_nemotron_pivot_all` | rule only (`nemotron_pivot.py`) |
 | `nemotron_pivot_grpo_judge.sh` | `grpo_nemotron_pivot_all_judge` (v1), `grpo_nemotron_pivot_v2` (v2) | judge + rule |
 | `nemotron_unified_grpo.sh` | `grpo_nemotron_unified_v3` | judge + graded matching |
+| `nemotron_unified_grpo_sft737.sh` | `grpo_nemotron_unified_v3_sft737` | v3, from `Qwen3-4B-Base-sft-737` |
+| `nemotron_unified_grpo_v4_sft737.sh` | `grpo_nemotron_unified_v4_sft737` | v3 behind a strict format gate |
 
 All require `OPENROUTER_API_KEY` in the environment except the first. No key is
 stored in this repo. `dev/dev.sh` forwards no env vars, so export it inside the
@@ -48,6 +50,35 @@ contributes its per-argument score, and missing and extra calls are charged -1
 each. Normalised by the ground-truth call count, so prose (every call missing)
 lands at exactly -1 and shares a range with the prose reward, whose judge
 verdict maps to +1/-1.
+
+**v4: strict format gate.** v3 inherited the hermes parser's leniency: an unclosed
+trailing `<tool_call>` was still parsed, text around and between blocks was ignored,
+and a response that never closed `</think>` was scanned whole. Late v3 rollouts
+exploited all of it (junk tokens between calls, stray `<think>` tags, 8% never
+closing the reasoning) and still collected full tool reward.
+`nemotron_unified_v4.py` accepts only the layout the SFT data renders, with no
+recovery:
+
+- Response must start with `<think>` and contain exactly one `<think>` and one
+  `</think>`, else the row's floor (-1.5 tool rows, -1 prose rows), no judge call
+  (`think_error`).
+- If the post-think text has any `<tool_call>`/`</tool_call>` tag it must be only
+  whitespace-separated blocks, each a JSON object with exactly `name` (non-empty
+  string) and `arguments` (object), no duplicate keys, no NaN. Anything else is
+  prose (`format_error`): -1.5 on tool rows, sent to the judge on prose rows.
+- **Prose on a tool row scores -1.5**, below the worst possible call (-1). On the
+  v3 sft737 run, calls on single-call rows fell from 43% to 26% of rollouts in 19
+  steps: prose and a wrong call both scored -1, so all-prose groups had no signal
+  while prose rows kept paying for prose. Replaying steps 18-21 under v4, single
+  groups with signal rise from 30% to 42% and the mean advantage of call rollouts
+  on those rows from +0.34 to +0.55.
+- With valid format a call scores exactly what v3 gave it. Replaying v3 steps 1-5 and 229-233
+  changed no valid-format tool-row score; v4 only removed credit v3 gave to
+  malformed output (think errors 7-18% of rollouts, markup errors 1-6%).
+
+Manager: `verl/workers/reward_manager/nemotron_judge_v4.py`
+(`NemotronJudgeV4RewardManager`). Tests:
+`tests/utils/reward_score/test_nemotron_unified_v4_on_cpu.py`.
 
 ## Reward internals worth knowing
 

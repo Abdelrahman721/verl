@@ -135,3 +135,7 @@ rl-data/
 verl_dumps/
 checkpoints/
 verl_dumps_mixed/
+# local secrets (API keys)
+dev/secrets.env
+
+.ray_tmp/
