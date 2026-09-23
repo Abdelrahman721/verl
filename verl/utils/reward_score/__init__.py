@@ -66,6 +66,13 @@ def default_compute_score(
         from . import nemotron_pivot
 
         res = nemotron_pivot.compute_score(solution_str, ground_truth, extra_info=extra_info)
+    elif data_source == "olive_rl300k":
+        # Unified-dataset RL cut (examples/data_preprocess/olive_rl300k_preprocess.py): tiered
+        # call matching with structured-string rules; prose rows go to the LLM judge, which
+        # needs the last user message that only NemotronJudgeRewardManager supplies.
+        from . import olive_rl300k
+
+        res = olive_rl300k.compute_score(solution_str, ground_truth, extra_info=extra_info)
     elif data_source == "sct_if":
         # SNOMED instruction-following (combined RL / IF JSONL → sct_if_preprocess parquet).
         from . import sct_if

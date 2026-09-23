@@ -28,7 +28,7 @@ from typing import Any
 
 from verl import DataProto
 from verl.experimental.reward_loop.reward_manager.base import RewardManagerBase
-from verl.utils.reward_score import nemotron_pivot_judge
+from verl.utils.reward_score import nemotron_pivot_judge, olive_rl300k
 
 
 def _last_user_message(raw_prompt: Any) -> str:
@@ -60,6 +60,9 @@ class NemotronJudgeRewardManager(RewardManagerBase):
         # is configured, so `compute_score or ...` would silently select the wrong scorer.
         # This manager exists to run the judge; bind it unconditionally.
         self.compute_score = nemotron_pivot_judge.compute_score
+        # data_source "olive_rl300k" (unified-dataset RL cut) has its own scorer: tiered call
+        # matching with structured-string rules, same judge path for prose. Routed per item below.
+        self._olive_compute_score = olive_rl300k.compute_score
         self.reward_router_address = reward_router_address
         self.reward_model_tokenizer = reward_model_tokenizer
         self._pool = ThreadPoolExecutor(
@@ -80,7 +83,9 @@ class NemotronJudgeRewardManager(RewardManagerBase):
         extra_info = dict(item.non_tensor_batch.get("extra_info") or {})
         extra_info["num_turns"] = item.non_tensor_batch.get("__num_turns__", None)
         extra_info["rollout_reward_scores"] = item.non_tensor_batch.get("reward_scores", {})
-        last_user = _last_user_message(item.non_tensor_batch.get("raw_prompt"))
+        raw_prompt = item.non_tensor_batch.get("raw_prompt")
+        last_user = _last_user_message(raw_prompt)
+        data_source = item.non_tensor_batch.get("data_source")
 
         response_str = await self.loop.run_in_executor(
             None, lambda: self.tokenizer.decode(valid_response_ids, skip_special_tokens=True)
@@ -88,6 +93,14 @@ class NemotronJudgeRewardManager(RewardManagerBase):
 
         def score_it():
             try:
+                if data_source == "olive_rl300k":
+                    return self._olive_compute_score(
+                        solution_str=response_str,
+                        ground_truth=ground_truth,
+                        extra_info=extra_info,
+                        last_user_message=last_user,
+                        raw_prompt=raw_prompt,  # tool schemas: enum-declared params are matched exactly
+                    )
                 return self.compute_score(
                     solution_str=response_str,
                     ground_truth=ground_truth,
@@ -98,6 +111,8 @@ class NemotronJudgeRewardManager(RewardManagerBase):
                 print(f"[nemotron_judge] scoring failed: {type(e).__name__}: {e}")
                 # Full key set: reward_extra_info is stacked across items, so a partial
                 # dict here would desync the metric arrays.
+                if data_source == "olive_rl300k":
+                    return {**{k: 0.0 for k in olive_rl300k.RESULT_KEYS}, "judge_error": 1.0}
                 return {"score": 0.0, "is_call": 0.0, "type_match": 0.0, "name_match": 0.0,
                         "format_error": 0.0, "judged": 0.0, "judge_score": 0.0, "judge_error": 1.0}
 
