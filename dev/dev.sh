@@ -8,7 +8,7 @@ WORKDIR_IN_CONTAINER="${WORKDIR_IN_CONTAINER:-/workspace/verl}"
 
 # behavior toggles
 PULL="${PULL:-0}"                 # 1 = docker pull image each run
-RECREATE="${RECREATE:-0}"         # 1 = delete + recreate container each run
+RECREATE="${RECREATE:-1}"         # 1 = delete + recreate container each run
 AS_USER="${AS_USER:-0}"           # 1 = run container as host UID/GID
 MOUNT_CACHES="${MOUNT_CACHES:-1}" # 1 = mount HF/torch/vllm caches
 NET_HOST="${NET_HOST:-1}"         # 1 = --net=host (recommended for vLLM/NCCL)
@@ -120,6 +120,16 @@ if ! running_container; then
   echo "[+] Starting container $NAME"
   docker start "$NAME" >/dev/null
 fi
+
+# ===== Shared-group file modes =====
+# The container runs as root with umask 022, which makes everything it writes
+# (checkpoints especially) group-read-only. /data is already setgid + group
+# `shared`, so umask 002 is all that's needed for teammates to be able to
+# overwrite checkpoints: new files land 664, new dirs 2775, group `shared`.
+docker exec "$NAME" bash -c '
+  grep -qx "umask 002" /etc/profile   || echo "umask 002" >> /etc/profile
+  grep -qx "umask 002" /root/.bashrc  || echo "umask 002" >> /root/.bashrc
+'
 
 echo "[+] Running: pip3 install --no-deps -e ."
 docker exec "$NAME" bash -lc "cd '$WORKDIR_IN_CONTAINER' && pip3 install --no-deps -e ."

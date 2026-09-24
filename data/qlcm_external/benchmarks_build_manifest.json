@@ -1,0 +1,129 @@
+{
+  "seed": 47,
+  "scope": "benchmarks RL splits (ehrsql dropped)",
+  "source_dir": "processed/sft/benchmarks/v1/splits/rl",
+  "dropped": [
+    "ehrsql"
+  ],
+  "datasets_included": [
+    "aci-bench",
+    "dischargeme",
+    "headqa",
+    "medcalcbench",
+    "meddialog",
+    "medec",
+    "medhallu",
+    "mediqa-qa",
+    "medmcqa",
+    "medqa",
+    "mimic-bhc",
+    "pubmedqa"
+  ],
+  "val_alloc": {
+    "aci-bench": 2,
+    "mediqa-qa": 2,
+    "headqa": 3,
+    "medec": 3,
+    "dischargeme": 5,
+    "medcalcbench": 5,
+    "meddialog": 5,
+    "medhallu": 5,
+    "medmcqa": 5,
+    "medqa": 5,
+    "mimic-bhc": 5,
+    "pubmedqa": 5
+  },
+  "counts": {
+    "train": {
+      "total": 17193,
+      "by_eval_mode": {
+        "mcq": 8507,
+        "numeric": 1995,
+        "text_judge_conv": 6256,
+        "medec_hybrid": 435
+      },
+      "by_helm_scenario": {
+        "pubmed_qa": 1995,
+        "medcalc_bench": 1995,
+        "med_qa": 1995,
+        "head_qa": 527,
+        "medhallu": 1995,
+        "med_mcqa": 1995,
+        "dischargeme": 1995,
+        "med_dialog": 1995,
+        "mimic_bhc": 1995,
+        "medi_qa": 206,
+        "medec": 435,
+        "aci_bench": 65
+      },
+      "by_data_source": {
+        "medical_benchmark_mcq": 8507,
+        "medical_benchmark_numeric": 1995,
+        "medical_benchmark_text": 6256,
+        "medical_benchmark_medec": 435
+      },
+      "by_source": {
+        "pubmedqa": 1995,
+        "medcalcbench": 1995,
+        "medqa": 1995,
+        "headqa": 527,
+        "medhallu": 1995,
+        "medmcqa": 1995,
+        "dischargeme": 1995,
+        "meddialog": 1995,
+        "mimic-bhc": 1995,
+        "mediqa-qa": 206,
+        "medec": 435,
+        "aci-bench": 65
+      }
+    },
+    "val": {
+      "total": 50,
+      "by_eval_mode": {
+        "mcq": 23,
+        "text_judge_conv": 19,
+        "numeric": 5,
+        "medec_hybrid": 3
+      },
+      "by_helm_scenario": {
+        "head_qa": 3,
+        "aci_bench": 2,
+        "med_dialog": 5,
+        "pubmed_qa": 5,
+        "dischargeme": 5,
+        "mimic_bhc": 5,
+        "medcalc_bench": 5,
+        "medi_qa": 2,
+        "med_mcqa": 5,
+        "med_qa": 5,
+        "medhallu": 5,
+        "medec": 3
+      },
+      "by_data_source": {
+        "medical_benchmark_mcq": 23,
+        "medical_benchmark_text": 19,
+        "medical_benchmark_numeric": 5,
+        "medical_benchmark_medec": 3
+      },
+      "by_source": {
+        "headqa": 3,
+        "aci-bench": 2,
+        "meddialog": 5,
+        "pubmedqa": 5,
+        "dischargeme": 5,
+        "mimic-bhc": 5,
+        "medcalcbench": 5,
+        "mediqa-qa": 2,
+        "medmcqa": 5,
+        "medqa": 5,
+        "medhallu": 5,
+        "medec": 3
+      }
+    }
+  },
+  "outputs": {
+    "train": "processed/rl/benchmarks/v1/train.parquet",
+    "val": "processed/rl/benchmarks/v1/val.parquet",
+    "sample": "samples/rl/benchmarks/v1/sample_train.jsonl"
+  }
+}

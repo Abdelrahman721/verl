@@ -1,0 +1,20 @@
+{
+  "sources": {
+    "mlb": {
+      "train": "/data/abdelrahman/verl/data/qlcm_external/mlb_train_combined.parquet",
+      "val": "/data/abdelrahman/verl/data/qlcm_external/icd_mlb_test.parquet",
+      "task_type": "icd10_multilabel",
+      "epochs": 1,
+      "gold_kind": "csv_string"
+    },
+    "snomed_ml": {
+      "train": "/data/abdelrahman/verl/data/qlcm_external/snomed_ml_real_train.parquet",
+      "val": "/data/abdelrahman/verl/data/qlcm_external/snomed_ml_real_test.parquet",
+      "task_type": "snomed_multilabel",
+      "epochs": 10,
+      "gold_kind": "json_string_passthrough"
+    }
+  },
+  "train_rows": 4338,
+  "val_rows": 145
+}

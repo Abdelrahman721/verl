@@ -1,0 +1,27 @@
+{
+  "sources": {
+    "mlb": {
+      "train": "/data/abdelrahman/mcs-instruct-dataset/avey_mlb_train_dataset.parquet",
+      "val": "/data/abdelrahman/mcs-instruct-dataset/avey_mlb_test_dataset.parquet",
+      "task_type": "icd10_multilabel",
+      "epochs": 3,
+      "gold_kind": "csv_string"
+    },
+    "slb": {
+      "train": "/data/abdelrahman/mcs-instruct-dataset/avey_icd_slb_rl_train_dataset.parquet",
+      "val": "/data/abdelrahman/mcs-instruct-dataset/avey_icd_slb_rl_test_dataset.parquet",
+      "task_type": "icd10_multilabel",
+      "epochs": 1,
+      "gold_kind": "list_like"
+    },
+    "snomed_ml": {
+      "train": "/data/abdelrahman/verl/data/qlcm_external/snomed_ml_real_train.parquet",
+      "val": "/data/abdelrahman/verl/data/qlcm_external/snomed_ml_real_test.parquet",
+      "task_type": "snomed_multilabel",
+      "epochs": 3,
+      "gold_kind": "json_string_passthrough"
+    }
+  },
+  "train_rows": 3378,
+  "val_rows": 681
+}

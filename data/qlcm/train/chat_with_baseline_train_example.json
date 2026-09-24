@@ -1,0 +1,22 @@
+{
+  "prompt": [
+    {
+      "content": "To draft and review a contract, the first step is to ( \u00a0 \u00a0).",
+      "role": "user"
+    }
+  ],
+  "data_source": "local/dolci-chat-32b",
+  "ability": "chat",
+  "reward_model": {
+    "ground_truth": "Determine the type of contract",
+    "style": "rule"
+  },
+  "extra_info": {
+    "baseline_model": "/data/abdelrahman/qwen-sft/sequential-instruction-following/out-qwen3-4b/snomed_icd_with_replay/checkpoint-5586",
+    "baseline_response": "The first step in drafting and reviewing a contract is to **identify the parties involved**. This involves clearly defining the roles, names, and legal identities of the individuals or entities that will be bound by the agreement. Without specifying the parties, the contract cannot be tailored to their specific needs, obligations, or rights, and it would lack the necessary elements to be enforceable. Once the parties are identified, you can proceed to outline the terms, such as the subject matter, scope of work, obligations, and other details required for a comprehensive contract.\n\nThis initial step ensures that the contract is focused and relevant from the outset, facilitating a smoother drafting and review process. It also helps prevent ambiguity and potential disputes later on.",
+    "custom_id": "virtuoussy_multi_subject_rlvr_filtered-request-136-69",
+    "index": 0,
+    "split": "train",
+    "user_prompt": "To draft and review a contract, the first step is to ( \u00a0 \u00a0)."
+  }
+}

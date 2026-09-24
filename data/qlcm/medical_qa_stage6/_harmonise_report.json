@@ -1,0 +1,59 @@
+{
+  "inputs": [
+    "/workspace/verl/data/qlcm/medical_qa_stage6/train.parquet",
+    "/workspace/verl/data/qlcm/medical_qa_stage6/retention.parquet"
+  ],
+  "unified_extra_info_fields": [
+    "prompt_id",
+    "task_type",
+    "index",
+    "system",
+    "entry",
+    "raw_id",
+    "gt_sct_ids",
+    "gt_labels",
+    "baseline_model",
+    "baseline_response",
+    "custom_id",
+    "split",
+    "user_prompt",
+    "constraint",
+    "constraint_type",
+    "key",
+    "tag",
+    "eval_mode",
+    "question",
+    "question_id",
+    "source",
+    "source_article",
+    "difficulty",
+    "type_id",
+    "specialty",
+    "topic_group",
+    "audience",
+    "parent_id",
+    "parent_conv_id",
+    "sub_conv_id",
+    "sub_index",
+    "total_subs",
+    "codes",
+    "rule",
+    "original_text",
+    "helm_scenario",
+    "sct_id",
+    "label"
+  ],
+  "dropped_conflicting_fields": [],
+  "files": [
+    {
+      "path": "/workspace/verl/data/qlcm/medical_qa_stage6/train.parquet",
+      "rows": 3378,
+      "rewritten": true
+    },
+    {
+      "path": "/workspace/verl/data/qlcm/medical_qa_stage6/retention.parquet",
+      "rows": 2013,
+      "rewritten": true
+    }
+  ]
+}

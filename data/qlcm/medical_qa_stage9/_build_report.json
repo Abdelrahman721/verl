@@ -1,0 +1,355 @@
+{
+  "seed": 42,
+  "k": 3,
+  "grid": [
+    256,
+    512,
+    768,
+    1024,
+    1280,
+    1536,
+    1792,
+    2048,
+    2304,
+    2560,
+    2816,
+    3072,
+    3328,
+    3584,
+    3840,
+    4096
+  ],
+  "val_rungs": [
+    256,
+    512,
+    1024,
+    2048,
+    4096
+  ],
+  "max_prompt_tokens": 8192,
+  "train": {
+    "mlb": [
+      {
+        "pool": "/data/abdelrahman/verl/data/qlcm/medical_qa_stage8/train.parquet",
+        "pool_rows": 3308,
+        "duplicates_skipped": 4,
+        "overlong_dropped": 1,
+        "selected": 700
+      }
+    ],
+    "ml": [
+      {
+        "pool": "/data/abdelrahman/verl/data/qlcm/medical_qa_stage5/train.parquet",
+        "pool_rows": 9828,
+        "duplicates_skipped": 0,
+        "overlong_dropped": 0,
+        "selected": 600
+      }
+    ],
+    "if": [
+      {
+        "pool": "/data/abdelrahman/verl/data/qlcm/medical_qa_stage5/train.parquet",
+        "pool_rows": 5292,
+        "duplicates_skipped": 0,
+        "overlong_dropped": 0,
+        "selected": 400
+      }
+    ],
+    "snomed_ml": [
+      {
+        "pool": "/data/abdelrahman/verl/data/qlcm/medical_qa_stage5/train.parquet",
+        "pool_rows": 10000,
+        "duplicates_skipped": 0,
+        "overlong_dropped": 0,
+        "selected": 500
+      },
+      {
+        "pool": "/data/abdelrahman/verl/data/qlcm/medical_qa_stage8/train.parquet",
+        "pool_rows": 1030,
+        "duplicates_skipped": 927,
+        "overlong_dropped": 0,
+        "selected": 103
+      }
+    ],
+    "snomed_if": [
+      {
+        "pool": "/data/abdelrahman/verl/data/qlcm/medical_qa_stage5/train.parquet",
+        "pool_rows": 10000,
+        "duplicates_skipped": 0,
+        "overlong_dropped": 0,
+        "selected": 400
+      }
+    ],
+    "sl": [
+      {
+        "pool": "/data/abdelrahman/verl/data/qlcm/medical_qa_stage4/train_coding_only.parquet",
+        "pool_rows": 10000,
+        "duplicates_skipped": 0,
+        "overlong_dropped": 0,
+        "selected": 200
+      }
+    ],
+    "snomed_sl": [
+      {
+        "pool": "/data/abdelrahman/verl/data/qlcm/medical_qa_stage4/train_coding_only.parquet",
+        "pool_rows": 15000,
+        "duplicates_skipped": 0,
+        "overlong_dropped": 0,
+        "selected": 200
+      }
+    ],
+    "slb": [
+      {
+        "pool": "/data/abdelrahman/verl/data/qlcm/medical_qa_stage6/train.parquet",
+        "pool_rows": 2145,
+        "duplicates_skipped": 0,
+        "overlong_dropped": 0,
+        "selected": 100
+      }
+    ],
+    "medical_qa": [
+      {
+        "pool": "/data/abdelrahman/verl/data/qlcm/medical_qa_stage2/train.parquet",
+        "pool_rows": 18412,
+        "duplicates_skipped": 0,
+        "overlong_dropped": 0,
+        "selected": 1200
+      }
+    ],
+    "medical_conv": [
+      {
+        "pool": "/data/abdelrahman/verl/data/qlcm/medical_qa_stage2/train.parquet",
+        "pool_rows": 18412,
+        "duplicates_skipped": 0,
+        "overlong_dropped": 0,
+        "selected": 1200
+      }
+    ],
+    "local/dolci-ifeval-32b": [
+      {
+        "pool": "/data/abdelrahman/verl/data/qlcm/train/ifeval_train.parquet",
+        "pool_rows": 29847,
+        "duplicates_skipped": 0,
+        "overlong_dropped": 0,
+        "selected": 900
+      }
+    ],
+    "local/dolci-chat-32b": [
+      {
+        "pool": "/data/abdelrahman/verl/data/qlcm/train/chat_with_baseline_train.parquet",
+        "pool_rows": 20708,
+        "duplicates_skipped": 2,
+        "overlong_dropped": 0,
+        "selected": 800
+      }
+    ],
+    "local/safety-dpo-reference": [
+      {
+        "pool": "/data/abdelrahman/verl/data/qlcm/train/safety_train.parquet",
+        "pool_rows": 11881,
+        "duplicates_skipped": 1,
+        "overlong_dropped": 0,
+        "selected": 500
+      }
+    ],
+    "local/avey-identity": [
+      {
+        "pool": "/data/abdelrahman/verl/data/qlcm/train/identity_train.parquet",
+        "pool_rows": 1581,
+        "duplicates_skipped": 5,
+        "overlong_dropped": 0,
+        "selected": 200
+      }
+    ]
+  },
+  "val": {
+    "val.parquet": {
+      "pool": "/data/abdelrahman/verl/data/medical_qa/val.parquet",
+      "pool_rows": 48,
+      "duplicates_skipped": 0,
+      "overlong_dropped": 0,
+      "selected": 48
+    },
+    "ifeval_eval.parquet": {
+      "pool": "/data/abdelrahman/verl/data/qlcm/eval/ifeval_eval.parquet",
+      "pool_rows": 100,
+      "duplicates_skipped": 0,
+      "overlong_dropped": 0,
+      "selected": 100
+    },
+    "gsm8k_eval.parquet": {
+      "pool": "/data/abdelrahman/verl/data/qlcm/eval/gsm8k_eval.parquet",
+      "pool_rows": 100,
+      "duplicates_skipped": 0,
+      "overlong_dropped": 0,
+      "selected": 50
+    },
+    "math500_eval.parquet": {
+      "pool": "/data/abdelrahman/verl/data/qlcm/eval/math500_eval.parquet",
+      "pool_rows": 100,
+      "duplicates_skipped": 0,
+      "overlong_dropped": 0,
+      "selected": 50
+    },
+    "general_chat_unseen.parquet": {
+      "pool": "/data/abdelrahman/verl/handoff/datasets/general_chat_unseen.parquet",
+      "pool_rows": 7536,
+      "duplicates_skipped": 0,
+      "overlong_dropped": 0,
+      "selected": 40
+    },
+    "general_safety_unseen.parquet": {
+      "pool": "/data/abdelrahman/verl/handoff/datasets/general_safety_unseen.parquet",
+      "pool_rows": 4281,
+      "duplicates_skipped": 0,
+      "overlong_dropped": 0,
+      "selected": 40
+    }
+  },
+  "extra_info_conflicts_dropped": {
+    "code": [
+      "list<element: string>",
+      "list<element: list<element: string>>"
+    ]
+  },
+  "extra_info_fields": [
+    "prompt_id",
+    "task_type",
+    "index",
+    "entry",
+    "raw_id",
+    "gt_sct_ids",
+    "gt_labels",
+    "codes",
+    "rule",
+    "original_text",
+    "user_prompt",
+    "baseline_model",
+    "baseline_response",
+    "custom_id",
+    "split",
+    "constraint",
+    "constraint_type",
+    "key",
+    "tag",
+    "eval_mode",
+    "question",
+    "question_id",
+    "source",
+    "source_article",
+    "difficulty",
+    "type_id",
+    "specialty",
+    "topic_group",
+    "audience",
+    "parent_id",
+    "parent_conv_id",
+    "sub_conv_id",
+    "sub_index",
+    "total_subs",
+    "helm_scenario",
+    "sct_id",
+    "label",
+    "system",
+    "category",
+    "mode",
+    "topic",
+    "answer",
+    "level",
+    "subject",
+    "lcpo_pid"
+  ],
+  "files": {
+    "train_coding": {
+      "path": "/data/abdelrahman/verl/data/qlcm/medical_qa_stage9/train_coding.parquet",
+      "rows": 9609
+    },
+    "train_medical": {
+      "path": "/data/abdelrahman/verl/data/qlcm/medical_qa_stage9/train_medical.parquet",
+      "rows": 7200
+    },
+    "train_general": {
+      "path": "/data/abdelrahman/verl/data/qlcm/medical_qa_stage9/train_general.parquet",
+      "rows": 7200
+    },
+    "val_budget_00256": {
+      "path": "/data/abdelrahman/verl/data/qlcm/medical_qa_stage9/val_budget_00256.parquet",
+      "rows": 673,
+      "mode": "budget",
+      "budget": 256
+    },
+    "val_budget_00512": {
+      "path": "/data/abdelrahman/verl/data/qlcm/medical_qa_stage9/val_budget_00512.parquet",
+      "rows": 673,
+      "mode": "budget",
+      "budget": 512
+    },
+    "val_budget_01024": {
+      "path": "/data/abdelrahman/verl/data/qlcm/medical_qa_stage9/val_budget_01024.parquet",
+      "rows": 673,
+      "mode": "budget",
+      "budget": 1024
+    },
+    "val_budget_02048": {
+      "path": "/data/abdelrahman/verl/data/qlcm/medical_qa_stage9/val_budget_02048.parquet",
+      "rows": 673,
+      "mode": "budget",
+      "budget": 2048
+    },
+    "val_budget_04096": {
+      "path": "/data/abdelrahman/verl/data/qlcm/medical_qa_stage9/val_budget_04096.parquet",
+      "rows": 673,
+      "mode": "budget",
+      "budget": 4096
+    },
+    "val_free": {
+      "path": "/data/abdelrahman/verl/data/qlcm/medical_qa_stage9/val_free.parquet",
+      "rows": 673,
+      "mode": "free",
+      "budget": -1
+    }
+  },
+  "rows_per_source": {
+    "mlb": 2100,
+    "ml": 1800,
+    "if": 1200,
+    "snomed_ml": 1809,
+    "snomed_if": 1200,
+    "sl": 600,
+    "snomed_sl": 600,
+    "slb": 300,
+    "medical_qa": 3600,
+    "medical_conv": 3600,
+    "local/dolci-ifeval-32b": 2700,
+    "local/dolci-chat-32b": 2400,
+    "local/safety-dpo-reference": 1500,
+    "local/avey-identity": 600
+  },
+  "mode_counts": {
+    "budget": 16859,
+    "free": 7150
+  },
+  "mode_fractions": {
+    "budget": 0.7022,
+    "free": 0.2978
+  },
+  "budget_hist": {
+    "256": 1099,
+    "512": 1029,
+    "768": 1063,
+    "1024": 1060,
+    "1280": 1033,
+    "1536": 1094,
+    "1792": 1044,
+    "2048": 1046,
+    "2304": 1044,
+    "2560": 1048,
+    "2816": 1003,
+    "3072": 1066,
+    "3328": 1079,
+    "3584": 1030,
+    "3840": 1062,
+    "4096": 1059
+  },
+  "train_rows": 24009
+}

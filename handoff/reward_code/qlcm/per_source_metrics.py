@@ -32,7 +32,7 @@ Usage: this module must be imported IN THE PROCESS THAT COMPUTES METRICS.
 
 That is not the process it looks like. `compute_data_metrics` runs inside the
 `TaskRunner` Ray actor (main_ppo.run_ppo creates it with `ray.remote(TaskRunner)`),
-whereas the import from `full_mix/rewards/compute_score.py` happens in the
+whereas the import from `qlcm/rewards/compute_score.py` happens in the
 RewardLoopWorker processes that score rollouts. Importing there patches those
 workers and nothing else, so every curve below silently goes missing while the
 run looks healthy. That is exactly what happened to the stage-a run of
@@ -40,23 +40,14 @@ run looks healthy. That is exactly what happened to the stage-a run of
 LCPO curves in wandb, and a math-slice collapse that took 170 steps to notice
 instead of 20.
 
-The training script therefore launches `full_mix.main_ppo` instead of
-`verl.trainer.main_ppo`. That entry point subclasses verl's TaskRunner and calls
-`install()` at the top of `run`, so the patch lands in the actor that computes
-the metrics. It requires the repo root on PYTHONPATH in the Ray workers; the
-training script exports it. The patch is idempotent, so importing it several ways
-is harmless.
+The training script therefore also passes this module's `install` as a Ray
+worker setup hook, which runs in every Ray worker including the TaskRunner:
 
-DO NOT install this as a Ray `worker_process_setup_hook`. It reaches the
-TaskRunner that way too, but Ray runs setup hooks in every worker BEFORE
-assigning that worker its GPUs. Importing this module imports verl, whose
-`utils/device.py` calls `torch.cuda.is_available()` at import time, and that
-first CUDA call freezes the process's device list to every GPU on the box. The
-per-actor CUDA_VISIBLE_DEVICES Ray sets afterwards is then ignored, which on
-2026-08-23 killed the TaskRunner with AssertionError("Invalid device id") from
-transformer_engine's import-time device probe, and then put all 8 ranks on
-physical GPU 0 ("Duplicate GPU detected : rank 3 and rank 0"). See
-full_mix/main_ppo.py for the full write-up.
+    +ray_kwargs.ray_init.runtime_env.worker_process_setup_hook=qlcm.per_source_metrics.install
+
+That requires the repo root on PYTHONPATH in the Ray workers; the training
+script exports it. The patch is idempotent, so importing it several ways is
+harmless.
 """
 
 from __future__ import annotations
@@ -68,7 +59,7 @@ import numpy as np
 
 from verl.trainer.ppo import metric_utils
 
-_PATCH_ATTR = "_full_mix_per_source_wrapped"
+_PATCH_ATTR = "_qlcm_per_source_wrapped"
 _orig_compute_data_metrics = metric_utils.compute_data_metrics
 
 
@@ -137,28 +128,16 @@ def _compute_per_source_metrics(batch) -> dict:
 
 
 # Budget buckets for the length curves. Edges match the validation rungs so the
-# in-training view and the eval ladder line up. The default is the 4B ladder;
-# a run on another grid sets LCPO_BUDGET_EDGES (comma-separated upper edges,
-# e.g. "256,512,1024,2048,4096") in the TaskRunner's environment.
-def _budget_edges() -> tuple[list, list]:
-    raw = os.environ.get("LCPO_BUDGET_EDGES", "").strip()
-    edges = [int(x) for x in raw.split(",") if x.strip()] if raw else [384, 768, 1536, 3024, 5000]
-    return [0, *edges, 10**9], [f"le{e}" for e in edges] + [f"gt{edges[-1]}"]
-
-
-_BUDGET_EDGES, _BUDGET_LABELS = _budget_edges()
+# in-training view and the eval ladder line up.
+_BUDGET_EDGES = [0, 384, 768, 1536, 3024, 5000, 10**9]
+_BUDGET_LABELS = ["le384", "le768", "le1536", "le3024", "le5000", "gt5000"]
 
 # Emitted per sample by LCPORewardManager. Mean of each, per group.
 _LCPO_MEAN_KEYS = (
     "task_score", "n_think", "n_answer", "abs_len_err", "rel_len_err",
-    "len_mult", "len_penalty", "is_wellformed", "nothink_format_ok", "truncated",
-    "chat_exact_half", "min_think_ok", "think_collapsed", "runaway", "alpha_eff",
+    "len_mult", "is_wellformed", "nothink_format_ok", "truncated",
+    "chat_exact_half",
 )
-
-# Optional numeric source code stamped by the reward function (see
-# qlcm/rewards/compute_score_lcpo.py). The dataset's data_source string never
-# reaches the trainer batch on the agent-loop path; this does.
-_SRC_ID_KEY = "src_id"
 
 
 def _budget_bucket(b: float) -> str:
@@ -218,13 +197,6 @@ def _compute_lcpo_metrics(batch) -> dict:
         buckets = np.array([_budget_bucket(b) for b in budgets])
         for label in _BUDGET_LABELS:
             emit(f"critic/lcpo/budget_{label}", mask & (buckets == label))
-
-    # Per-source curves, when the reward stamped a source code.
-    if _SRC_ID_KEY in ntb:
-        src_ids = np.asarray(ntb[_SRC_ID_KEY], dtype=float)
-        for sid in np.unique(src_ids):
-            for mode in np.unique(modes):
-                emit(f"critic/lcpo/src_{int(sid)}/mode_{mode}", (src_ids == sid) & (modes == mode))
 
     return out
 

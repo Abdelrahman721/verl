@@ -1,0 +1,26 @@
+{
+  "sources": {
+    "icd10_multilabel": {
+      "train": "/data/abdelrahman/mcs-instruct-dataset/avey_icd_multi_label_rl_train_dataset.parquet",
+      "val": "/data/abdelrahman/mcs-instruct-dataset/avey_icd_multi_label_rl_test_dataset.parquet",
+      "icd": true
+    },
+    "icd10_instruction_follow": {
+      "train": "/data/abdelrahman/mcs-instruct-dataset/avey_icd_if_rl_train_dataset.parquet",
+      "val": "/data/abdelrahman/mcs-instruct-dataset/avey_icd_if_rl_test_dataset.parquet",
+      "icd": true
+    },
+    "snomed_multilabel": {
+      "train": "/data/abdelrahman/verl/data/qlcm_external/snomed_ml_train.parquet",
+      "val": "/data/abdelrahman/verl/data/qlcm_external/snomed_ml_test.parquet",
+      "icd": false
+    },
+    "snomed_instruction_follow": {
+      "train": "/data/abdelrahman/verl/data/qlcm_external/snomed_if_train.parquet",
+      "val": "/data/abdelrahman/verl/data/qlcm_external/snomed_if_test.parquet",
+      "icd": false
+    }
+  },
+  "train_rows": 35120,
+  "val_rows": 13373
+}

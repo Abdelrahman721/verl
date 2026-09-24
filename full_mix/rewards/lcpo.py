@@ -6,10 +6,28 @@ the token accounting and calls in here.
 
 The three modes and their rules:
 
+    runaway  reward = -runaway_penalty            (any mode, either stage; checked first)
     nothink  reward = task_score * format_gate
     free     reward = task_score
     budget   Stage A:  task_score - alpha * |budget - n_len|
-             Stage B:  task_score * clip(alpha * (budget - n_len) + delta, 0, 1)
+             Stage B:  task_score * clip(alpha_eff * (budget - n_len) + delta, 0, 1)
+
+A response is a RUNAWAY when it did not terminate: it was cut by
+max_response_length, or it never emitted </think>. Either way no answer was
+produced. It scores a flat -runaway_penalty (default 1.0) before any mode rule
+runs, so a finished wrong answer (0) always beats a loop (-1), while nothing in
+the rule rewards being shorter than any other finished answer. A response that
+closed the tag but has an empty answer is malformed, not a runaway, and keeps
+the score-0 treatment. Why a flat rule and not a length term: 5-15% of the
+stage-b step-500 checkpoint's generations, free mode included, were verbatim
+repetition loops running into the 16,384 cap, and under task*mult a capped
+sample scored 0 — identical to a finished wrong answer, so the group-relative
+advantage never learned that looping is worse than being wrong.
+
+`alpha_eff` in stage B is alpha with a budget-proportional floor, see
+`effective_alpha`: the multiplier reaches zero no later than
+`max_slack_frac * budget` tokens past the budget, instead of a fixed
+delta/alpha tokens at every budget.
 
 `n_len` is the CONTROLLED LENGTH, selected by `length_target`:
 
@@ -46,6 +64,14 @@ from __future__ import annotations
 
 DEFAULT_ALPHA = 0.0003   # the paper's value; anchor for math, calibrated per source
 DEFAULT_DELTA = 0.5      # the paper's value
+# Stage B only. The multiplier hits zero no later than max_slack_frac * budget
+# tokens over budget. 0 or None disables; then the slack is the fixed
+# delta/alpha tokens at every budget (pre-2026-09-21 behaviour).
+DEFAULT_MAX_SLACK_FRAC = 1.0
+# Flat reward for a response that never terminated (cut by the cap, or no
+# </think>). Applies in every mode and both stages. 0 restores the old
+# behaviour, where a runaway scored the same 0 as a finished wrong answer.
+DEFAULT_RUNAWAY_PENALTY = 1.0
 
 # Which length the budget governs. See the module docstring.
 LENGTH_TARGET_TOTAL = "total"
@@ -104,17 +130,40 @@ def stage_a_multiplier_terms(budget: int, n_len: int, alpha: float) -> float:
     return alpha * abs(int(budget) - int(n_len))
 
 
-def stage_b_multiplier(budget: int, n_len: int, alpha: float, delta: float = DEFAULT_DELTA) -> float:
+def effective_alpha(budget: int, alpha: float, delta: float, max_slack_frac: float | None) -> float:
+    """alpha with a budget-proportional floor: max(alpha, delta / (max_slack_frac * budget)).
+
+    With the floor, the stage-B multiplier reaches zero at
+    n = budget + max_slack_frac * budget whenever that is tighter than the fixed
+    delta/alpha slack, and is byte-identical to the unfloored reward otherwise.
+    At alpha 3.5e-4, delta 0.85, frac 1.0 the crossover is budget = 2429: below
+    it the floor binds, at and above it nothing changes.
+    """
+    if not max_slack_frac or max_slack_frac <= 0 or int(budget) <= 0:
+        return float(alpha)
+    return max(float(alpha), float(delta) / (float(max_slack_frac) * int(budget)))
+
+
+def stage_b_multiplier(
+    budget: int,
+    n_len: int,
+    alpha: float,
+    delta: float = DEFAULT_DELTA,
+    max_slack_frac: float | None = DEFAULT_MAX_SLACK_FRAC,
+) -> float:
     """Stage B multiplier: 1 well under budget, delta at budget, 0 well over.
 
-    Note the grace zone is a fixed token count (delta/alpha ~= 1667 at the
-    paper's alpha), so at small budgets it is wide relative to the budget: at
-    budget 200 a response ~1700 tokens over still keeps ~44% of the task score.
-    Watch percentage length error at the 256 and 512 rungs; if they do not
-    converge, switch the term to (budget - n_think) / budget, which gives the
-    same grace zone in percentage terms at every scale.
+    The slope is `effective_alpha`. Without the floor the grace zone is a fixed
+    token count (delta/alpha, 2429 tokens at the shipped alpha 3.5e-4 and delta
+    0.85) at every budget, so at small budgets it is wide relative to the
+    budget: measured on the stage-b step-500 checkpoint, a 512-token budget kept
+    67% of the reward at double its length and the within-budget rate at 512
+    was 53% on MATH-500. With the proportional floor (max_slack_frac 1.0) the
+    zero point is 2N for N < 2429 and unchanged above; delta keeps its meaning
+    as the multiplier at exactly n == budget.
     """
-    return clip01(alpha * (int(budget) - int(n_len)) + delta)
+    a = effective_alpha(budget, alpha, delta, max_slack_frac)
+    return clip01(a * (int(budget) - int(n_len)) + delta)
 
 
 def compute_reward(
@@ -132,8 +181,18 @@ def compute_reward(
     length_target: str = DEFAULT_LENGTH_TARGET,
     min_think_floor: int = DEFAULT_MIN_THINK_FLOOR,
     min_think_frac: float = DEFAULT_MIN_THINK_FRAC,
+    max_slack_frac: float | None = DEFAULT_MAX_SLACK_FRAC,
+    terminated: bool = True,
+    runaway_penalty: float = DEFAULT_RUNAWAY_PENALTY,
 ) -> dict:
-    """Return {"reward", "len_mult", "len_penalty", "task_score_used", "min_think_ok"}.
+    """Return {"reward", "len_mult", "len_penalty", "task_score_used", "min_think_ok",
+    "runaway", "alpha_eff"}.
+
+    `terminated` is False for a runaway: the response was cut by the length cap
+    or never emitted </think>. That is checked before any mode branch and scores
+    a flat -runaway_penalty with the length term left unevaluated. `alpha_eff`
+    is the slope actually used; it equals `alpha` outside budget mode / stage B
+    so the key is always present.
 
     `wellformed` means: a </think> was emitted and something non-empty follows.
     A malformed response has its task score forced to 0 — it has no answer, so
@@ -150,7 +209,14 @@ def compute_reward(
     """
     score = float(task_score) if wellformed else 0.0
     out = {"reward": 0.0, "len_mult": 1.0, "len_penalty": 0.0,
-           "task_score_used": score, "min_think_ok": 1.0}
+           "task_score_used": score, "min_think_ok": 1.0,
+           "runaway": 0.0, "alpha_eff": float(alpha)}
+
+    # Did not terminate: no answer exists, whatever the mode. Worse than wrong.
+    if not terminated:
+        out.update(reward=-float(runaway_penalty), len_mult=0.0,
+                   task_score_used=0.0, runaway=1.0)
+        return out
 
     if mode == MODE_NOTHINK:
         gate = 1.0 if nothink_ok else 0.0
@@ -190,7 +256,8 @@ def compute_reward(
         # malformed and merely-wrong collapse together here. That is the paper's
         # form and it is acceptable because Stage B starts from a Stage A
         # checkpoint that has already learned to close the tag.
-        mult = stage_b_multiplier(budget, n_len, alpha, delta)
+        out["alpha_eff"] = effective_alpha(budget, alpha, delta, max_slack_frac)
+        mult = stage_b_multiplier(budget, n_len, alpha, delta, max_slack_frac)
         out["len_mult"] = mult
         out["reward"] = score * mult
         return out

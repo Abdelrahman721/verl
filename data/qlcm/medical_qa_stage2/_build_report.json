@@ -1,0 +1,31 @@
+{
+  "cache": "/workspace/verl/data/qlcm/medical_qa_stage2/_stats_cache.json",
+  "threshold": 0.6,
+  "conv_keep_n_requested": 17197,
+  "qa_keep_n_requested": 18412,
+  "conv_keep_fraction_requested": null,
+  "conv_keep_seed": 1234,
+  "pools": {
+    "A_carry_forward": {
+      "rows": 19627,
+      "data_source": {
+        "medical_conv": 1215,
+        "medical_qa": 18412
+      },
+      "source_indices_count": 19627
+    },
+    "B_unseen_conv_sample": {
+      "rows": 17197,
+      "source_indices_count": 17197,
+      "unseen_pool_total": 17197
+    }
+  },
+  "carve": {},
+  "output_train_parquet": "/workspace/verl/data/qlcm/medical_qa_stage2/train.parquet",
+  "total_rows": 36824,
+  "total_data_source_counts": {
+    "medical_conv": 18412,
+    "medical_qa": 18412
+  },
+  "mastered_source_indices_count": 8196
+}

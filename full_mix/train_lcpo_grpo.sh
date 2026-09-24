@@ -21,9 +21,9 @@
 # the dual-mode SFT model on the BUCKETIZED mix (budgets on a 256-token grid,
 # 256..6144); pass MODEL_PATH=<stage-a ckpt> to start from a stage-a run instead.
 #
-#   bash full_mix/train_lcpo_grpo.sh                                    # stage b
-#   LCPO_STAGE=a DATA_DIR=.../lcpo_mix_bucket VAL_DIR=.../lcpo_val_bucket \
-#     bash full_mix/train_lcpo_grpo.sh                                  # stage a
+#   bash full_mix/train_lcpo_grpo.sh                # stage b, _max data, one alpha
+#   LCPO_STAGE=a bash full_mix/train_lcpo_grpo.sh   # stage a, exact-wording data,
+#                                                   # per-source alphas, own dump dir
 #
 # Forked from full_mix/train_sync_chat_ifeval.sh, keeping its execution model:
 # all 8 GPUs are shared, vLLM generates, sleeps, the actor trains, weights
@@ -52,12 +52,29 @@ export WANDB_API_KEY=${WANDB_API_KEY:-}
 _REPO_ROOT_DIR="$(dirname "$_FM_DIR")"
 export PYTHONPATH="${_REPO_ROOT_DIR}${PYTHONPATH:+:${PYTHONPATH}}"
 
+# ---- stage ----
+# Chosen first: the model, the data, the alphas and the dump dir all follow it.
+# a = LCPO-Exact (symmetric |budget - n| penalty, "Think for N tokens." data)
+# b = LCPO-Max   (ceiling multiplier, "Think for a maximum of N tokens." data)
+LCPO_STAGE=${LCPO_STAGE:-b}
+case "${LCPO_STAGE}" in
+  a) _DATA_SUFFIX="" ;;
+  b) _DATA_SUFFIX="_max" ;;
+  *) echo "LCPO_STAGE must be 'a' (Exact) or 'b' (Max); got '${LCPO_STAGE}'" >&2; exit 2 ;;
+esac
+
+
 # ---- model ----
-# The dual-mode SFT model, i.e. stage b with no stage-a run in front of it (the
-# stage-a checkpoint this used to point at is not on this host). A host path
-# rather than /workspace: dev/dev.sh bind-mounts /data/abdelrahman at the same
-# path inside the container.
-MODEL_PATH=${MODEL_PATH:-/data/abdelrahman/qwen-sft/full_scale/out-qwen3-4b/dual-mode-sft-tagged}
+# Host paths rather than /workspace: dev/dev.sh bind-mounts /data/abdelrahman at
+# the same path inside the container.
+#   stage a  starts from exact_model/merged_hf_model (set 2026-09-20).
+#   stage b  starts from the dual-mode SFT model, i.e. with no stage-a run in
+#            front of it; pass MODEL_PATH=<stage-a merged ckpt> to chain them.
+if [[ "${LCPO_STAGE}" == "a" ]]; then
+  MODEL_PATH=${MODEL_PATH:-/data/abdelrahman/verl/exact_model/merged_hf_model}
+else
+  MODEL_PATH=${MODEL_PATH:-/data/abdelrahman/qwen-sft/full_scale/out-qwen3-4b/dual-mode-sft-tagged}
+fi
 
 
 # ---- data ----
@@ -76,8 +93,8 @@ MODEL_PATH=${MODEL_PATH:-/data/abdelrahman/qwen-sft/full_scale/out-qwen3-4b/dual
 # sibling. Point these at lcpo_mix_bucket / lcpo_val_bucket for stage a, or at
 # lcpo_mix_max / lcpo_val_max for the un-bucketized data (whose val rungs are
 # named differently — see VAL_FILES).
-DATA_DIR=${DATA_DIR:-/workspace/verl/data/lcpo_mix_bucket_max}
-VAL_DIR=${VAL_DIR:-/workspace/verl/data/lcpo_val_bucket_max}
+DATA_DIR=${DATA_DIR:-/workspace/verl/data/lcpo_mix_bucket${_DATA_SUFFIX}}
+VAL_DIR=${VAL_DIR:-/workspace/verl/data/lcpo_val_bucket${_DATA_SUFFIX}}
 
 CHAT_VARIANT=${CHAT_VARIANT:-chat_with_baseline}
 case "$CHAT_VARIANT" in
@@ -143,17 +160,19 @@ LOSS_AGG_MODE=${LOSS_AGG_MODE:-token-mean}
 
 
 # ---- overlong buffer ----
-# OFF for LCPO. It adds its penalty AFTER the score, so on top of stage b's
-# multiplied reward it would drive the reward negative exactly where stage b
-# already intends zero. With budgets capped at 6144 it would rarely fire anyway.
+# OFF for LCPO, and superseded by LCPO_RUNAWAY_PENALTY below. The DAPO buffer
+# only starts OVERLONG_BUFFER_LEN tokens before the cap, and by then a
+# repetition loop is thousands of tokens deep; it also cannot see a response
+# that stops (EOS) without ever emitting </think>. The flat runaway rule fires
+# on the fact that matters — the response never terminated — and covers both.
+# Left in place, disabled, so the knobs still exist.
 ENABLE_OVERLONG_BUFFER=${ENABLE_OVERLONG_BUFFER:-False}
 OVERLONG_BUFFER_LEN=${OVERLONG_BUFFER_LEN:-1024}
 OVERLONG_PENALTY_FACTOR=${OVERLONG_PENALTY_FACTOR:-1.0}
 
 
 # ---- LCPO ----
-# stage a = LCPO-Exact, stage b = LCPO-Max (see the header).
-LCPO_STAGE=${LCPO_STAGE:-b}
+# stage a = LCPO-Exact, stage b = LCPO-Max; LCPO_STAGE is set in the data section.
 # delta is the multiplier a response keeps for landing EXACTLY on budget, and it
 # also sets both edges of the ramp:
 #
@@ -178,6 +197,29 @@ LCPO_STAGE=${LCPO_STAGE:-b}
 # flatten the ladder. 0.85 leaves a mild pull toward coming in slightly under
 # rather than parking on the cap.
 LCPO_DELTA=${LCPO_DELTA:-0.85}
+# 2026-09-21 fix 1 (stage b only): a budget-proportional floor on alpha,
+#   alpha_eff(N) = max(alpha, delta / (LCPO_MAX_SLACK_FRAC * N)),
+# so the multiplier reaches zero no later than LCPO_MAX_SLACK_FRAC * N tokens
+# past the budget. With the fixed alpha above the zero point was N + 2429 at
+# EVERY budget: at N = 512 a 2x overshoot still kept 67% of the reward, and the
+# step-500 sweep measured only 53% within budget at 512 on MATH-500. At 1.0:
+#
+#     N     zero point before   after   full credit at
+#     256           2,685         512          211
+#     512           2,941       1,024          422
+#   1,024           3,453       2,048          843
+#   2,048           4,477       4,096        1,687
+#   >=2,429     N + 2,429   unchanged      N - 429
+#
+# delta keeps its meaning (multiplier at n == N); monotonicity in N still
+# holds (test_lcpo). 0 or "none" disables and restores the fixed slack.
+LCPO_MAX_SLACK_FRAC=${LCPO_MAX_SLACK_FRAC:-1.0}
+# 2026-09-21 fix 2 (all modes, both stages): a response that never terminates
+# — cut by MAX_RESPONSE_LEN, or ended without ever emitting </think> — scores a
+# flat -LCPO_RUNAWAY_PENALTY instead of the 0 a finished wrong answer gets.
+# At 0 a loop ties with "wrong" and GRPO never learns that looping is worse;
+# at 1.0 it is unambiguously the worst member of its 16-sample group.
+LCPO_RUNAWAY_PENALTY=${LCPO_RUNAWAY_PENALTY:-1.0}
 # Which length the budget governs. "total" = think + answer, "think" = the think
 # span only. MUST stay "total": under "think" the answer body is unconstrained,
 # so the cheapest way to satisfy a budget is to relocate the reasoning rather
@@ -246,10 +288,19 @@ LCPO_MIN_THINK_FRAC=${LCPO_MIN_THINK_FRAC:-0.10}
 #
 # The stage-a values (1.6e-4 math / 2.4e-4 ifeval / 3.7e-4 chat) are recorded in
 # the block above and want restoring if stage a is ever run again.
-LCPO_ALPHA=${LCPO_ALPHA:-0.00035}
-LCPO_ALPHA_MATH=${LCPO_ALPHA_MATH:-0.00035}
-LCPO_ALPHA_IFEVAL=${LCPO_ALPHA_IFEVAL:-0.00035}
-LCPO_ALPHA_CHAT=${LCPO_ALPHA_CHAT:-0.00035}
+# Stage a restores the per-source values calibrated above (gate G2); stage b
+# uses one value near the paper's 3e-4. Override any of them explicitly.
+if [[ "${LCPO_STAGE}" == "a" ]]; then
+  LCPO_ALPHA=${LCPO_ALPHA:-0.00024}
+  LCPO_ALPHA_MATH=${LCPO_ALPHA_MATH:-0.00016}
+  LCPO_ALPHA_IFEVAL=${LCPO_ALPHA_IFEVAL:-0.00024}
+  LCPO_ALPHA_CHAT=${LCPO_ALPHA_CHAT:-0.00037}
+else
+  LCPO_ALPHA=${LCPO_ALPHA:-0.00035}
+  LCPO_ALPHA_MATH=${LCPO_ALPHA_MATH:-0.00035}
+  LCPO_ALPHA_IFEVAL=${LCPO_ALPHA_IFEVAL:-0.00035}
+  LCPO_ALPHA_CHAT=${LCPO_ALPHA_CHAT:-0.00035}
+fi
 
 
 # ---- batching (SYNC semantics — differs from the async script) ----
@@ -275,7 +326,13 @@ fi
 
 
 # ---- rollout / validation dump dirs ----
-DUMP_ROOT=${DUMP_ROOT:-/workspace/verl/dumps/lcpo_budget_sync_bucket}
+# Stage b keeps the original directory (the 504-step run lives there); stage a
+# gets its own so the two runs' rollout and validation dumps never mix.
+if [[ "${LCPO_STAGE}" == "a" ]]; then
+  DUMP_ROOT=${DUMP_ROOT:-/workspace/verl/dumps/lcpo_budget_sync_bucket_stagea}
+else
+  DUMP_ROOT=${DUMP_ROOT:-/workspace/verl/dumps/lcpo_budget_sync_bucket}
+fi
 ROLLOUT_DATA_DIR=${ROLLOUT_DATA_DIR:-${DUMP_ROOT}/rollouts}
 VALIDATION_DATA_DIR=${VALIDATION_DATA_DIR:-${DUMP_ROOT}/val}
 
@@ -351,7 +408,7 @@ export FULL_MIX_JUDGE_MAX_RETRIES=${FULL_MIX_JUDGE_MAX_RETRIES:-3}
 # degenerate provider ran to 13k tokens before halting — paid for in full, and
 # blocking a reward worker for minutes. 8K still leaves room for reasoning.
 export FULL_MIX_JUDGE_MAX_TOKENS=${FULL_MIX_JUDGE_MAX_TOKENS:-16384}
-export FULL_MIX_JUDGE_FORCE_JSON=${FULL_MIX_JUDGE_FORCE_JSON:-1}
+export FULL_MIX_JUDGE_FORCE_JSON=${FULL_MIX_JUDGE_FORCE_JSON:-0}
 export FULL_MIX_JUDGE_DISABLE_THINKING=${FULL_MIX_JUDGE_DISABLE_THINKING:-0}
 # Reasoning stays ON. It is the judge's accuracy/latency dial, and turning it
 # off changes the reward the policy is trained against — set explicitly rather
@@ -392,8 +449,26 @@ export FULL_MIX_JUDGE_DISABLE_REASONING=${FULL_MIX_JUDGE_DISABLE_REASONING:-0}
 # ~0.13 higher as a result, so calls that spill across the pool are judged
 # slightly differently. Set DISABLE_REASONING=1 to make them behave alike, at
 # the cost of changing the reward the policy trains against.
-export FULL_MIX_JUDGE_PROVIDER_ONLY=${FULL_MIX_JUDGE_PROVIDER_ONLY:-baidu,deepinfra,together,digitalocean,baseten,novita}
-export FULL_MIX_JUDGE_PROVIDER_ORDER=${FULL_MIX_JUDGE_PROVIDER_ORDER:-baidu,deepinfra,together,digitalocean,baseten,novita}
+# 2026-09-18: baidu -> coreweave, novita -> makora, wafer added. Checked that
+# day against the endpoints API and pinned 8-token probes:
+#   coreweave  status 0, 99.99% 1d uptime, 0.3s, fp8, 262k ctx. Supports NEITHER
+#              response_format nor structured_outputs, and a pinned call carrying
+#              any response_format now 404s ("No endpoints found") — OpenRouter
+#              treats response_format as a routing filter regardless of
+#              require_parameters. With FORCE_JSON=1 it is therefore never
+#              selected; it only serves calls if FORCE_JSON=0. Same is true of
+#              baseten (json_object also 404s); digitalocean takes json_object
+#              but not json_schema.
+#   makora     status 0, 98.3% 30m / 99.0% 1d, 0.5s, structured outputs yes.
+#              Was throttling at the time: 2 of 4 concurrent probes got 429
+#              "temporarily rate-limited upstream". Retries cover that.
+#   wafer      status 0, 100% 30m / 99.96% 1d, 0.3s, structured outputs yes,
+#              clean under a 4-call burst. Fastest schema-capable member; put it
+#              earlier in ORDER if throttling on deepinfra/together shows up.
+# So the members that actually answer json_schema calls are deepinfra, together,
+# makora and wafer; digitalocean joins after the json_object downgrade.
+export FULL_MIX_JUDGE_PROVIDER_ONLY=${FULL_MIX_JUDGE_PROVIDER_ONLY:-coreweave,deepinfra,together,digitalocean,baseten,makora,wafer}
+export FULL_MIX_JUDGE_PROVIDER_ORDER=${FULL_MIX_JUDGE_PROVIDER_ORDER:-coreweave,deepinfra,together,digitalocean,baseten,makora,wafer}
 # OFF, deliberately. With it on, OpenRouter routes only to providers that
 # support every parameter we send, which excludes digitalocean and baseten
 # (neither implements response_format) — pinned to either, the request 404s.
@@ -567,6 +642,8 @@ python3 -m full_mix.main_ppo \
   +reward.reward_kwargs.lcpo.length_target="${LCPO_LENGTH_TARGET}" \
   +reward.reward_kwargs.lcpo.min_think_floor="${LCPO_MIN_THINK_FLOOR}" \
   +reward.reward_kwargs.lcpo.min_think_frac="${LCPO_MIN_THINK_FRAC}" \
+  +reward.reward_kwargs.lcpo.max_slack_frac="${LCPO_MAX_SLACK_FRAC}" \
+  +reward.reward_kwargs.lcpo.runaway_penalty="${LCPO_RUNAWAY_PENALTY}" \
   +reward.reward_kwargs.overlong_buffer_cfg.enable="${ENABLE_OVERLONG_BUFFER}" \
   +reward.reward_kwargs.overlong_buffer_cfg.len="${OVERLONG_BUFFER_LEN}" \
   +reward.reward_kwargs.overlong_buffer_cfg.penalty_factor="${OVERLONG_PENALTY_FACTOR}" \

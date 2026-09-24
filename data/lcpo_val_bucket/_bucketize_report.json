@@ -1,0 +1,156 @@
+{
+  "kind": "val",
+  "src": "data/lcpo_val",
+  "dst": "data/lcpo_val_bucket",
+  "grid": {
+    "step": 256,
+    "min": 256,
+    "max": 6144,
+    "n_values": 24,
+    "values": [
+      256,
+      512,
+      768,
+      1024,
+      1280,
+      1536,
+      1792,
+      2048,
+      2304,
+      2560,
+      2816,
+      3072,
+      3328,
+      3584,
+      3840,
+      4096,
+      4352,
+      4608,
+      4864,
+      5120,
+      5376,
+      5632,
+      5888,
+      6144
+    ]
+  },
+  "seed": null,
+  "files": {
+    "val_budget_00256.parquet": {
+      "output": "data/lcpo_val_bucket/val_budget_00256.parquet",
+      "rows": 300,
+      "rewritten": 300,
+      "untouched": 0,
+      "rung_from": 256,
+      "rung_to": 256,
+      "styles_after": {
+        "budget/exact": 300
+      },
+      "budget_hist": {
+        "256": 300
+      }
+    },
+    "val_budget_00512.parquet": {
+      "output": "data/lcpo_val_bucket/val_budget_00512.parquet",
+      "rows": 300,
+      "rewritten": 300,
+      "untouched": 0,
+      "rung_from": 512,
+      "rung_to": 512,
+      "styles_after": {
+        "budget/exact": 300
+      },
+      "budget_hist": {
+        "512": 300
+      }
+    },
+    "val_budget_01024.parquet": {
+      "output": "data/lcpo_val_bucket/val_budget_01024.parquet",
+      "rows": 300,
+      "rewritten": 300,
+      "untouched": 0,
+      "rung_from": 1024,
+      "rung_to": 1024,
+      "styles_after": {
+        "budget/exact": 300
+      },
+      "budget_hist": {
+        "1024": 300
+      }
+    },
+    "val_budget_02048.parquet": {
+      "output": "data/lcpo_val_bucket/val_budget_02048.parquet",
+      "rows": 300,
+      "rewritten": 300,
+      "untouched": 0,
+      "rung_from": 2048,
+      "rung_to": 2048,
+      "styles_after": {
+        "budget/exact": 300
+      },
+      "budget_hist": {
+        "2048": 300
+      }
+    },
+    "val_budget_04000.parquet": {
+      "output": "data/lcpo_val_bucket/val_budget_04096.parquet",
+      "rows": 300,
+      "rewritten": 300,
+      "untouched": 0,
+      "rung_from": 4000,
+      "rung_to": 4096,
+      "styles_after": {
+        "budget/exact": 300
+      },
+      "budget_hist": {
+        "4096": 300
+      }
+    },
+    "val_budget_06000.parquet": {
+      "output": "data/lcpo_val_bucket/val_budget_06144.parquet",
+      "rows": 300,
+      "rewritten": 300,
+      "untouched": 0,
+      "rung_from": 6000,
+      "rung_to": 6144,
+      "styles_after": {
+        "budget/exact": 300
+      },
+      "budget_hist": {
+        "6144": 300
+      }
+    },
+    "val_free.parquet": {
+      "output": "data/lcpo_val_bucket/val_free.parquet",
+      "rows": 300,
+      "rewritten": 0,
+      "copied": true,
+      "styles_after": {
+        "free/None": 300
+      },
+      "budget_hist": {}
+    },
+    "val_nothink.parquet": {
+      "output": "data/lcpo_val_bucket/val_nothink.parquet",
+      "rows": 300,
+      "rewritten": 0,
+      "copied": true,
+      "styles_after": {
+        "nothink/None": 300
+      },
+      "budget_hist": {}
+    }
+  },
+  "budget_rows": 1800,
+  "budget_hist": {
+    "256": 300,
+    "512": 300,
+    "1024": 300,
+    "2048": 300,
+    "4096": 300,
+    "6144": 300
+  },
+  "budget_min_seen": 256,
+  "budget_max_seen": 6144,
+  "budget_mean": 2346.7
+}

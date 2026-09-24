@@ -25,12 +25,21 @@ ALPHA = lcpo.DEFAULT_ALPHA
 
 
 def _r(mode, stage, score, wellformed, n_think, budget, nothink_ok=True,
-       n_answer=0, length_target=lcpo.DEFAULT_LENGTH_TARGET):
+       n_answer=0, length_target=lcpo.DEFAULT_LENGTH_TARGET, terminated=True,
+       max_slack_frac=lcpo.DEFAULT_MAX_SLACK_FRAC,
+       runaway_penalty=lcpo.DEFAULT_RUNAWAY_PENALTY, delta=lcpo.DEFAULT_DELTA,
+       alpha=ALPHA):
     return lcpo.compute_reward(
         mode=mode, stage=stage, task_score=score, wellformed=wellformed,
         n_think=n_think, n_total=n_think + n_answer, budget=budget,
-        nothink_ok=nothink_ok, alpha=ALPHA, length_target=length_target,
+        nothink_ok=nothink_ok, alpha=alpha, delta=delta, length_target=length_target,
+        terminated=terminated, max_slack_frac=max_slack_frac,
+        runaway_penalty=runaway_penalty,
     )["reward"]
+
+
+# The shipped stage-b settings (train_lcpo_grpo.sh), used by the floor tests.
+SHIP_ALPHA, SHIP_DELTA, SHIP_FRAC = 3.5e-4, 0.85, 1.0
 
 
 def test_nothink_gate_accepts_whitespace():
@@ -85,12 +94,90 @@ def test_stage_b_multiplier_shape():
 
 
 def test_stage_b_is_monotone_in_budget():
-    """The property the whole project is for: more budget is never worse."""
-    best = []
-    for budget in (256, 512, 1024, 2048, 4000, 6000):
-        best.append(max(_r("budget", "b", 1.0, True, nt, budget)
-                        for nt in range(0, 6001, 50)))
-    assert all(x <= y + 1e-9 for x, y in zip(best, best[1:])), f"not monotone: {best}"
+    """The property the whole project is for: more budget is never worse.
+
+    Checked with the proportional floor ON (the default), and in the stronger
+    form the floor could have broken: at a FIXED length, the multiplier must be
+    non-decreasing in the budget across the whole trained grid.
+    """
+    grid = list(range(256, 6145, 256))
+    for frac in (lcpo.DEFAULT_MAX_SLACK_FRAC, None):
+        best = [max(_r("budget", "b", 1.0, True, nt, b, max_slack_frac=frac)
+                    for nt in range(0, 6001, 50)) for b in (256, 512, 1024, 2048, 4000, 6000)]
+        assert all(x <= y + 1e-9 for x, y in zip(best, best[1:])), f"not monotone (frac={frac}): {best}"
+        for n in (100, 300, 600, 1000, 1500, 2500, 4000, 6000, 9000):
+            ms = [lcpo.stage_b_multiplier(b, n, SHIP_ALPHA, SHIP_DELTA, frac) for b in grid]
+            assert all(x <= y + 1e-9 for x, y in zip(ms, ms[1:])), f"fixed n={n} not monotone (frac={frac}): {ms}"
+
+
+def test_effective_alpha_floor():
+    ea = lambda b, frac=SHIP_FRAC: lcpo.effective_alpha(b, SHIP_ALPHA, SHIP_DELTA, frac)
+    assert abs(ea(512) - SHIP_DELTA / 512) < 1e-12
+    assert ea(4096) == SHIP_ALPHA
+    assert abs(ea(2429) - SHIP_ALPHA) < 1e-6          # crossover: delta/alpha = 2428.6
+    assert ea(512, None) == SHIP_ALPHA
+    assert ea(512, 0) == SHIP_ALPHA
+    assert lcpo.effective_alpha(-1, SHIP_ALPHA, SHIP_DELTA, SHIP_FRAC) == SHIP_ALPHA
+
+
+def test_stage_b_zero_point_is_proportional_at_small_budgets():
+    m = lambda b, n, frac=SHIP_FRAC: lcpo.stage_b_multiplier(b, n, SHIP_ALPHA, SHIP_DELTA, frac)
+    for N in (256, 512, 1024):
+        assert m(N, 2 * N) == 0.0, f"N={N}: zero point must be 2N"
+        assert abs(m(N, N) - SHIP_DELTA) < 1e-9, f"N={N}: delta at n == N"
+        assert abs(m(N, int(1.5 * N)) - SHIP_DELTA / 2) < 1e-9, f"N={N}: half of delta at 1.5N"
+        assert m(N, 2 * N - 1) > 0.0
+    # Large budgets: byte-identical to the fixed slack.
+    assert m(4096, 4096 + 2429) == 0.0
+    assert m(4096, 4096 + 1000) == m(4096, 4096 + 1000, None)
+    assert abs(m(4096, 4096 + 1000) - (SHIP_DELTA - SHIP_ALPHA * 1000)) < 1e-9
+    assert m(6144, 6144 - 429) == 1.0
+
+
+def test_runaway_is_below_wrong_in_every_mode():
+    """A loop scores -1.0 even with task score 1.0, and a finished wrong answer
+    always beats it. Outside stage-a budget mode the wrong answer scores exactly
+    0; in stage-a budget mode it also carries the symmetric length term, so it is
+    slightly negative there but still far above -1."""
+    for stage in ("a", "b"):
+        for mode, budget in (("nothink", -1), ("free", -1), ("budget", 1024)):
+            loop = _r(mode, stage, 1.0, True, 800, budget, terminated=False)
+            wrong = _r(mode, stage, 0.0, True, 800, budget)
+            assert loop == -1.0, f"{mode}/{stage}: runaway must score -1.0, got {loop}"
+            assert wrong > loop, f"{mode}/{stage}: a finished wrong answer must beat a loop"
+            if not (mode == "budget" and stage == "a"):
+                assert wrong == 0.0, f"{mode}/{stage}: a finished wrong answer scores 0, got {wrong}"
+            else:
+                assert wrong == -ALPHA * abs(1024 - 800)
+
+
+def test_runaway_ignores_length_term():
+    out = lcpo.compute_reward(mode="budget", stage="b", task_score=1.0, wellformed=True,
+                              n_think=50, n_total=60, budget=6144, alpha=SHIP_ALPHA,
+                              delta=SHIP_DELTA, terminated=False)
+    assert out["reward"] == -1.0 and out["len_mult"] == 0.0 and out["runaway"] == 1.0
+    assert out["task_score_used"] == 0.0
+
+
+def test_runaway_penalty_is_configurable():
+    assert _r("free", "b", 1.0, True, 9000, -1, terminated=False, runaway_penalty=0.0) == 0.0
+    assert _r("budget", "b", 1.0, True, 800, 512, terminated=False, runaway_penalty=0.25) == -0.25
+
+
+def test_malformed_but_terminated_is_not_a_runaway():
+    for stage in ("a", "b"):
+        out = lcpo.compute_reward(mode="free", stage=stage, task_score=1.0, wellformed=False,
+                                  n_think=300, n_total=300, budget=-1, alpha=ALPHA, terminated=True)
+        assert out["reward"] == 0.0 and out["runaway"] == 0.0
+
+
+def test_reward_dict_always_carries_the_new_keys():
+    for mode, stage, budget in (("nothink", "a", -1), ("free", "b", -1), ("budget", "a", 512), ("budget", "b", 512)):
+        out = lcpo.compute_reward(mode=mode, stage=stage, task_score=1.0, wellformed=True,
+                                  n_think=100, n_total=120, budget=budget, alpha=ALPHA)
+        assert "runaway" in out and "alpha_eff" in out
+        if not (mode == "budget" and stage == "b"):
+            assert out["alpha_eff"] == ALPHA
 
 
 def test_reasoning_in_the_answer_is_not_rewarded_by_the_length_term():

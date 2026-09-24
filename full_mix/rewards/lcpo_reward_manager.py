@@ -64,6 +64,10 @@ EXTRA_KEYS = (
     # if the gate is retuned. In the stage-a run of 2026-08-19 this share went
     # 3% -> 38% -> 90% across steps 15-19 and nothing surfaced it.
     "min_think_ok", "think_collapsed",
+    # 2026-09-21 reward fixes. `runaway`: response never terminated (cap or no
+    # </think>) and took the flat penalty. `alpha_eff`: the stage-B slope after
+    # the budget-proportional floor; equals alpha outside budget/stage B.
+    "runaway", "alpha_eff",
 )
 
 # Absolute think-token count below which a budgeted response is "collapsed".
@@ -134,10 +138,20 @@ class LCPORewardManager(RewardManagerBase):
         )
         self.min_think_floor = int(lcpo_cfg.get("min_think_floor", lcpo.DEFAULT_MIN_THINK_FLOOR))
         self.min_think_frac = float(lcpo_cfg.get("min_think_frac", lcpo.DEFAULT_MIN_THINK_FRAC))
+        # Budget-proportional floor on alpha (stage B). None / "none" / 0 disables.
+        msf = lcpo_cfg.get("max_slack_frac", lcpo.DEFAULT_MAX_SLACK_FRAC)
+        if msf is None or str(msf).strip().lower() in ("none", "null", ""):
+            self.max_slack_frac = None
+        else:
+            self.max_slack_frac = float(msf) if float(msf) > 0 else None
+        # Flat penalty for responses that never terminate. 0 switches it off.
+        self.runaway_penalty = float(lcpo_cfg.get("runaway_penalty", lcpo.DEFAULT_RUNAWAY_PENALTY))
         print(
             f"[LCPORewardManager] stage={self.stage} length_target={self.length_target} "
             f"min_think=max({self.min_think_floor}, {self.min_think_frac}*budget) "
-            f"alpha={self.alpha_default} alpha_by_source={self.alpha_by_source}",
+            f"alpha={self.alpha_default} alpha_by_source={self.alpha_by_source} "
+            f"delta={self.delta} max_slack_frac={self.max_slack_frac} "
+            f"runaway_penalty={self.runaway_penalty}",
             flush=True,
         )
 
@@ -207,12 +221,18 @@ class LCPORewardManager(RewardManagerBase):
         else:
             task_score = float(result)
 
+        # Runaway = cut by the cap OR no </think>: no answer was produced.
+        truncated = valid_response_length >= response_length
+        terminated = bool(closed) and not truncated
+
         out = lcpo.compute_reward(
             mode=mode, stage=self.stage, task_score=task_score, wellformed=wellformed,
             n_think=n_think, n_total=int(valid_response_length), budget=budget,
             nothink_ok=nothink_ok, alpha=self.alpha_for(data_source), delta=self.delta,
             length_target=self.length_target,
             min_think_floor=self.min_think_floor, min_think_frac=self.min_think_frac,
+            max_slack_frac=self.max_slack_frac,
+            terminated=terminated, runaway_penalty=self.runaway_penalty,
         )
 
         extra["score"] = float(out["reward"])
@@ -226,7 +246,9 @@ class LCPORewardManager(RewardManagerBase):
         extra["is_wellformed"] = 1.0 if wellformed else 0.0
         extra["is_nothink_mode"] = 1.0 if mode == MODE_NOTHINK else 0.0
         extra["nothink_format_ok"] = 1.0 if (mode != MODE_NOTHINK or nothink_ok) else 0.0
-        extra["truncated"] = 1.0 if valid_response_length >= response_length else 0.0
+        extra["truncated"] = 1.0 if truncated else 0.0
+        extra["runaway"] = float(out["runaway"])
+        extra["alpha_eff"] = float(out["alpha_eff"])
         # Judge-outage signal. The chat scorer returns exactly 0.5 when the judge
         # is unreachable, and under stage B's multiplication that is invisible:
         # every chat sample still gets a varying length multiplier, so the slice
