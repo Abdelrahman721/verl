@@ -240,6 +240,60 @@ def test_prompt_round_trip():
         assert text.count(marker) == 1
 
 
+def test_answer_cap_off_is_identity():
+    # delta 0.8 as in the training scripts: 200 think tokens at a 1,024 budget
+    # is well inside the grace zone, so the budget multiplier is exactly 1.
+    kw = dict(mode=lcpo.MODE_BUDGET, stage="b", task_score=1.0, wellformed=True, n_think=200,
+              n_total=2200, budget=1024, alpha=ALPHA, delta=0.8, length_target=lcpo.LENGTH_TARGET_THINK)
+    base = lcpo.compute_reward(**kw)
+    off = lcpo.compute_reward(**kw, n_answer=2000, answer_cap=None)
+    assert off == base and off["answer_cap_mult"] == 1.0 and off["answer_over_cap"] == 0.0
+    # think target: a 2,000-token answer body is invisible to the length term
+    assert base["len_mult"] == 1.0 and base["reward"] == 1.0
+
+
+def test_answer_cap_multiplier_shape():
+    assert lcpo.answer_cap_multiplier(100, 100) == 1.0
+    assert lcpo.answer_cap_multiplier(150, 100) == 0.5
+    assert lcpo.answer_cap_multiplier(200, 100) == 0.0
+    assert lcpo.answer_cap_multiplier(999, 100) == 0.0
+    assert lcpo.answer_cap_multiplier(999, None) == 1.0
+    assert lcpo.answer_cap_tokens(None) is None
+    assert lcpo.answer_cap_tokens(400) == 600            # 1.5 * 400
+    assert lcpo.answer_cap_tokens(7) == 64               # floor for tiny-answer sources
+    assert lcpo.answer_cap_tokens(400, mult=2.0, floor=0) == 800
+
+
+def test_answer_cap_scales_reward_budget_mode_only():
+    kw = dict(stage="b", task_score=1.0, wellformed=True, n_think=200, budget=1024,
+              alpha=ALPHA, delta=0.8, length_target=lcpo.LENGTH_TARGET_THINK)
+    under = lcpo.compute_reward(mode=lcpo.MODE_BUDGET, n_total=800, n_answer=600, answer_cap=600, **kw)
+    half = lcpo.compute_reward(mode=lcpo.MODE_BUDGET, n_total=1100, n_answer=900, answer_cap=600, **kw)
+    gone = lcpo.compute_reward(mode=lcpo.MODE_BUDGET, n_total=1400, n_answer=1200, answer_cap=600, **kw)
+    assert under["reward"] == 1.0 and under["answer_over_cap"] == 0.0
+    assert abs(half["reward"] - 0.5) < 1e-9 and half["answer_over_cap"] == 1.0 and half["answer_cap_mult"] == 0.5
+    assert gone["reward"] == 0.0 and gone["answer_cap_mult"] == 0.0
+    # the budget multiplier is reported separately and untouched
+    assert half["len_mult"] == 1.0
+    # free mode: the cap is never applied
+    free = lcpo.compute_reward(mode=lcpo.MODE_FREE, n_total=1400, n_answer=1200, answer_cap=600, **kw)
+    assert free["reward"] == 1.0 and free["answer_cap_mult"] == 1.0
+    # runaway wins over the cap
+    run = lcpo.compute_reward(mode=lcpo.MODE_BUDGET, n_total=1400, n_answer=1200, answer_cap=600, terminated=False, **kw)
+    assert run["reward"] == -1.0 and run["answer_cap_mult"] == 1.0
+    # stage a: subtractive form, cap scales the score term only
+    a = lcpo.compute_reward(mode=lcpo.MODE_BUDGET, n_total=1100, n_answer=900, answer_cap=600,
+                            **{**kw, "stage": "a", "n_think": 1024})
+    assert abs(a["reward"] - 0.5) < 1e-9 and a["len_penalty"] == 0.0
+
+
+def test_answer_cap_keys_always_present():
+    for mode in (lcpo.MODE_BUDGET, lcpo.MODE_FREE, lcpo.MODE_NOTHINK):
+        out = lcpo.compute_reward(mode=mode, stage="b", task_score=1.0, wellformed=True, n_think=100,
+                                  n_total=150, budget=512, alpha=ALPHA)
+        assert "answer_cap_mult" in out and "answer_over_cap" in out
+
+
 def main() -> int:
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     failed = 0

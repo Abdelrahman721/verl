@@ -116,6 +116,37 @@ def controlled_length(n_think: int, n_total: int, length_target: str) -> int:
     )
 
 
+DEFAULT_ANSWER_CAP_MULT = 1.5
+DEFAULT_ANSWER_CAP_FLOOR = 64
+
+
+def answer_cap_tokens(ref_len: float | None, mult: float = DEFAULT_ANSWER_CAP_MULT,
+                      floor: int = DEFAULT_ANSWER_CAP_FLOOR) -> int | None:
+    """Answer-body ceiling for the leak guard: max(floor, mult * ref_len).
+
+    `ref_len` is the source's free-mode answer length (a measured fact, kept in
+    a per-source table); `mult` is the slack allowed above it. None means no
+    ceiling for this source.
+    """
+    if ref_len is None:
+        return None
+    return int(max(floor, round(float(mult) * float(ref_len))))
+
+
+def answer_cap_multiplier(n_answer: int, cap: int | None) -> float:
+    """Leak guard for length_target='think': 1.0 up to `cap` answer tokens,
+    then linear to 0.0 at 2*cap. With the think block budgeted and the answer
+    free, relocating the reasoning into the answer is the cheapest way to
+    comply; this makes an answer body far longer than the source's free-mode
+    norm cost reward. Off (1.0) when cap is None.
+    """
+    if cap is None or cap <= 0:
+        return 1.0
+    if n_answer <= cap:
+        return 1.0
+    return max(0.0, 1.0 - (float(n_answer) - cap) / float(cap))
+
+
 def min_think_tokens(
     budget: int,
     floor: int = DEFAULT_MIN_THINK_FLOOR,
@@ -184,9 +215,16 @@ def compute_reward(
     max_slack_frac: float | None = DEFAULT_MAX_SLACK_FRAC,
     terminated: bool = True,
     runaway_penalty: float = DEFAULT_RUNAWAY_PENALTY,
+    n_answer: int | None = None,
+    answer_cap: int | None = None,
 ) -> dict:
     """Return {"reward", "len_mult", "len_penalty", "task_score_used", "min_think_ok",
-    "runaway", "alpha_eff"}.
+    "runaway", "alpha_eff", "answer_cap_mult", "answer_over_cap"}.
+
+    `answer_cap` (leak guard, budget mode only): ceiling on `n_answer` tokens
+    above which the reward is scaled by `answer_cap_multiplier`. None = off.
+    `answer_cap_mult` is the factor applied (1.0 when off or under the cap),
+    `answer_over_cap` is 1.0 when the answer exceeded the cap.
 
     `terminated` is False for a runaway: the response was cut by the length cap
     or never emitted </think>. That is checked before any mode branch and scores
@@ -210,7 +248,8 @@ def compute_reward(
     score = float(task_score) if wellformed else 0.0
     out = {"reward": 0.0, "len_mult": 1.0, "len_penalty": 0.0,
            "task_score_used": score, "min_think_ok": 1.0,
-           "runaway": 0.0, "alpha_eff": float(alpha)}
+           "runaway": 0.0, "alpha_eff": float(alpha),
+           "answer_cap_mult": 1.0, "answer_over_cap": 0.0}
 
     # Did not terminate: no answer exists, whatever the mode. Worse than wrong.
     if not terminated:
@@ -243,6 +282,15 @@ def compute_reward(
     if int(n_think) < min_think_tokens(budget, min_think_floor, min_think_frac):
         out["min_think_ok"] = 0.0
         score = 0.0
+        out["task_score_used"] = score
+
+    # Leak guard on the answer body (budget mode only). Scales the task score,
+    # so a wrong answer stays 0 and a runaway is already handled above.
+    if answer_cap is not None and n_answer is not None:
+        cap_mult = answer_cap_multiplier(int(n_answer), int(answer_cap))
+        out["answer_cap_mult"] = cap_mult
+        out["answer_over_cap"] = 1.0 if int(n_answer) > int(answer_cap) else 0.0
+        score = score * cap_mult
         out["task_score_used"] = score
 
     if stage == "a":

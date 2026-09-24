@@ -153,6 +153,7 @@ _LCPO_MEAN_KEYS = (
     "task_score", "n_think", "n_answer", "abs_len_err", "rel_len_err",
     "len_mult", "len_penalty", "is_wellformed", "nothink_format_ok", "truncated",
     "chat_exact_half", "min_think_ok", "think_collapsed", "runaway", "alpha_eff",
+    "answer_over_cap", "answer_cap_mult",
 )
 
 # Optional numeric source code stamped by the reward function (see
@@ -225,6 +226,39 @@ def _compute_lcpo_metrics(batch) -> dict:
         for sid in np.unique(src_ids):
             for mode in np.unique(modes):
                 emit(f"critic/lcpo/src_{int(sid)}/mode_{mode}", (src_ids == sid) & (modes == mode))
+
+    # Leak metrics: answer-body length of budgeted rows relative to free rows in
+    # the same batch (and the same source, when stamped). Under
+    # length_target="think" the answer is unconstrained, so a ratio drifting
+    # above 1 at the small budgets is reasoning relocating into the answer.
+    # Free rows are the reference because they are the model's own current
+    # norm, not a fixed table.
+    if "n_answer" in vals:
+        n_ans = vals["n_answer"]
+        is_free = modes == "free"
+        is_budget = modes == "budget"
+        buckets = np.array([_budget_bucket(b) for b in budgets])
+
+        def leak(prefix: str, sel: np.ndarray) -> None:
+            free_m = n_ans[sel & is_free]
+            if free_m.size == 0 or free_m.mean() <= 0:
+                return
+            ref = float(free_m.mean())
+            out[f"{prefix}/leak/free_n_answer"] = ref
+            b = sel & is_budget
+            if b.any():
+                out[f"{prefix}/leak/answer_ratio"] = float(n_ans[b].mean() / ref)
+                out[f"{prefix}/leak/answer_over_1p5x_free"] = float((n_ans[b] > 1.5 * ref).mean())
+            for label in _BUDGET_LABELS:
+                bb = b & (buckets == label)
+                if bb.any():
+                    out[f"{prefix}/leak/budget_{label}/answer_ratio"] = float(n_ans[bb].mean() / ref)
+
+        leak("critic/lcpo", np.ones(n, dtype=bool))
+        if _SRC_ID_KEY in ntb:
+            src_ids = np.asarray(ntb[_SRC_ID_KEY], dtype=float)
+            for sid in np.unique(src_ids):
+                leak(f"critic/lcpo/src_{int(sid)}", src_ids == sid)
 
     return out
 

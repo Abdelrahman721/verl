@@ -68,6 +68,11 @@ EXTRA_KEYS = (
     # </think>) and took the flat penalty. `alpha_eff`: the stage-B slope after
     # the budget-proportional floor; equals alpha outside budget/stage B.
     "runaway", "alpha_eff",
+    # Leak guard (length_target="think"). `answer_cap`: the answer-token ceiling
+    # in force for the row, -1 when the guard is off or the source has no
+    # reference; `answer_over_cap`: 1 when the answer body exceeded it;
+    # `answer_cap_mult`: the factor applied to the task score (1.0 = none).
+    "answer_cap", "answer_over_cap", "answer_cap_mult",
 )
 
 # Absolute think-token count below which a budgeted response is "collapsed".
@@ -146,17 +151,43 @@ class LCPORewardManager(RewardManagerBase):
             self.max_slack_frac = float(msf) if float(msf) > 0 else None
         # Flat penalty for responses that never terminate. 0 switches it off.
         self.runaway_penalty = float(lcpo_cfg.get("runaway_penalty", lcpo.DEFAULT_RUNAWAY_PENALTY))
+        # Leak guard for length_target="think": an answer body longer than
+        # max(floor, mult * ref) tokens scales the task score linearly to 0 at
+        # twice that. `ref` is the source's free-mode answer length, from a
+        # per-source table keyed by the BASE data_source (the "@b00256" /
+        # "@free" validation tags are stripped for the lookup). Off by default;
+        # with enable=0 the keys are still emitted so the leak can be measured
+        # before the guard is ever switched on.
+        self.answer_cap_enable = str(lcpo_cfg.get("answer_cap_enable", False)).strip().lower() in ("1", "true", "yes")
+        self.answer_cap_mult = float(lcpo_cfg.get("answer_cap_mult", lcpo.DEFAULT_ANSWER_CAP_MULT))
+        self.answer_cap_floor = int(lcpo_cfg.get("answer_cap_floor", lcpo.DEFAULT_ANSWER_CAP_FLOOR))
+        self.answer_cap_ref_by_source = {str(k): float(v) for k, v in (lcpo_cfg.get("answer_cap_ref_by_source", {}) or {}).items()}
+        ref_default = lcpo_cfg.get("answer_cap_ref_default", None)
+        self.answer_cap_ref_default = None if ref_default is None or str(ref_default).strip().lower() in ("none", "null", "") else float(ref_default)
         print(
             f"[LCPORewardManager] stage={self.stage} length_target={self.length_target} "
             f"min_think=max({self.min_think_floor}, {self.min_think_frac}*budget) "
             f"alpha={self.alpha_default} alpha_by_source={self.alpha_by_source} "
             f"delta={self.delta} max_slack_frac={self.max_slack_frac} "
-            f"runaway_penalty={self.runaway_penalty}",
+            f"runaway_penalty={self.runaway_penalty} "
+            f"answer_cap_enable={self.answer_cap_enable} answer_cap_mult={self.answer_cap_mult} "
+            f"answer_cap_floor={self.answer_cap_floor} answer_cap_ref_default={self.answer_cap_ref_default} "
+            f"answer_cap_ref_by_source={self.answer_cap_ref_by_source}",
             flush=True,
         )
 
     def alpha_for(self, data_source: str) -> float:
         return self.alpha_by_source.get(str(data_source), self.alpha_default)
+
+    def answer_cap_for(self, data_source: str) -> int | None:
+        """Answer-token ceiling for this row, or None when the guard is off or
+        the source has no reference length. The lookup uses the base source
+        name so tagged validation rows share the training rows' ceiling."""
+        if not self.answer_cap_enable:
+            return None
+        base = str(data_source).split("@", 1)[0]
+        ref = self.answer_cap_ref_by_source.get(base, self.answer_cap_ref_default)
+        return lcpo.answer_cap_tokens(ref, self.answer_cap_mult, self.answer_cap_floor)
 
     async def run_single(self, data: DataProto) -> dict:
         assert len(data) == 1, "Only support single data item"
@@ -225,6 +256,7 @@ class LCPORewardManager(RewardManagerBase):
         truncated = valid_response_length >= response_length
         terminated = bool(closed) and not truncated
 
+        answer_cap = self.answer_cap_for(data_source)
         out = lcpo.compute_reward(
             mode=mode, stage=self.stage, task_score=task_score, wellformed=wellformed,
             n_think=n_think, n_total=int(valid_response_length), budget=budget,
@@ -233,6 +265,7 @@ class LCPORewardManager(RewardManagerBase):
             min_think_floor=self.min_think_floor, min_think_frac=self.min_think_frac,
             max_slack_frac=self.max_slack_frac,
             terminated=terminated, runaway_penalty=self.runaway_penalty,
+            n_answer=n_answer, answer_cap=answer_cap,
         )
 
         extra["score"] = float(out["reward"])
@@ -249,6 +282,9 @@ class LCPORewardManager(RewardManagerBase):
         extra["truncated"] = 1.0 if truncated else 0.0
         extra["runaway"] = float(out["runaway"])
         extra["alpha_eff"] = float(out["alpha_eff"])
+        extra["answer_cap"] = float(answer_cap if answer_cap is not None else -1)
+        extra["answer_over_cap"] = float(out["answer_over_cap"])
+        extra["answer_cap_mult"] = float(out["answer_cap_mult"])
         # Judge-outage signal. The chat scorer returns exactly 0.5 when the judge
         # is unreachable, and under stage B's multiplication that is invisible:
         # every chat sample still gets a varying length multiplier, so the slice
