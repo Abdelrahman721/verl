@@ -17,7 +17,7 @@ SHM_SIZE="${SHM_SIZE:-20g}"
 # Extra host dirs to bind-mount identically into the container (colon-separated).
 # Default includes /data/abdelrahman so the preprocessors' absolute dataset and
 # output paths resolve inside the container. Override with DATA_MOUNTS="".
-DATA_MOUNTS="${DATA_MOUNTS:-/data/abdelrahman}"
+DATA_MOUNTS="${DATA_MOUNTS:-/mnt/data01/abdelrahman}"
 
 # Load optional env file (lets teammates customize without editing script)
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
