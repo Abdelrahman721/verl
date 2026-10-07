@@ -21,8 +21,8 @@ PKG_DIR = REPO / "verl" / "utils" / "reward_score"
 
 
 def _load():
-    """Import verl.utils.reward_score.{nemotron_pivot,nemotron_pivot_judge,olive_rl300k}
-    without executing verl/__init__.py."""
+    """Import verl.utils.reward_score.{nemotron_pivot,nemotron_pivot_judge,nemotron_unified_v4,
+    olive_rl300k} without executing verl/__init__.py."""
     try:
         return importlib.import_module("verl.utils.reward_score.olive_rl300k")
     except Exception:
@@ -32,7 +32,7 @@ def _load():
             m = types.ModuleType(name)
             m.__path__ = [str(REPO / name.replace(".", "/"))]
             sys.modules[name] = m
-    for mod in ("nemotron_pivot", "nemotron_pivot_judge", "olive_rl300k"):
+    for mod in ("nemotron_pivot", "nemotron_pivot_judge", "nemotron_unified_v4", "olive_rl300k"):
         full = f"verl.utils.reward_score.{mod}"
         if full in sys.modules:
             continue
@@ -317,6 +317,130 @@ def test_expert_actions_score_one_on_corpus():
             assert out["score"] == 1.0, (r["extra_info"]["row_id"], out)
             n += 1
     assert n > 0
+
+
+# --------------------------------------------------------------------------- format gate (v4)
+
+TOOL_SCHEMA = {"type": "function", "function": {"name": "run", "description": "", "parameters": {
+    "type": "object",
+    "properties": {"cmd": {"type": "string"}, "duration": {"type": "number", "default": 1.0},
+                   "quiet": {"type": "boolean", "default": False}},
+    "required": ["cmd"]}}}
+
+
+def prompt_with(*tools):
+    return [{"role": "system",
+             "content": "sys\n\n# Tools\n<tools>\n" + "\n".join(json.dumps(t) for t in tools) + "\n</tools>\ntail"},
+            {"role": "user", "content": "go"}]
+
+
+BAD_THINK = [
+    call("f", x=1),                                  # no think block at all
+    "reasoning\n</think>\n" + call("f", x=1),        # no opening tag
+    " <think>x</think>" + call("f", x=1),            # leading space
+    "<think>x" + call("f", x=1),                     # never closed
+    "<think>x</think>y</think>" + call("f", x=1),    # two closes
+    T + call("f", x=1) + "\n<think>\n" + call("g"),  # stray think tag after the reasoning
+]
+
+BAD_MARKUP = [
+    call("f", x=1)[: -len("</tool_call>")],          # unclosed
+    call("f", x=1) + "\n</tool_call>",               # stray close
+    "Sure.\n" + call("f", x=1),                      # text before
+    call("f", x=1) + "\nDone.",                      # text after
+    '<tool_call>\n{"name": "f", "arguments": "{\\"x\\": 1}"}\n</tool_call>',   # arguments as a string
+    '<tool_call>\n{"name": "f"}\n</tool_call>',                                # no arguments
+    '<tool_call>\n{"name": "f", "arguments": {}, "id": 1}\n</tool_call>',       # extra key
+]
+
+
+def test_bad_think_is_floored_and_never_judged():
+    with patched(R, "judge_prose", _no_judge):
+        for resp in BAD_THINK:
+            for gt in (gt_call("f", x=1), gt_batch(("f", {"x": 1}), ("g", {})), gt_msg()):
+                r = R.compute_score(resp, gt, last_user_message="hi")
+                assert r["score"] == R.THINK_ERROR_SCORE, (resp, gt, r)
+                assert r["think_error"] == 1.0 and r["judged"] == 0.0 and r["is_call"] == 0.0
+
+
+def test_broken_markup_is_prose_never_a_partial_call():
+    with patched(R, "judge_prose", _no_judge):
+        for tail in BAD_MARKUP:
+            r = R.compute_score(T + tail, gt_call("f", x=1))
+            assert r["score"] == -1.0 and r["is_call"] == 0.0 and r["format_error"] == 1.0, (tail, r)
+    # on a prose row the same text is judged like any other prose
+    seen = []
+    with patched(R, "judge_prose", lambda u, c: (seen.append(c), (1.0, ""))[1]):
+        r = R.compute_score(T + BAD_MARKUP[0], gt_msg(), last_user_message="hi")
+    assert r["score"] == 1.0 and r["judged"] == 1.0 and r["format_error"] == 1.0
+    assert seen == [BAD_MARKUP[0].strip()]
+
+
+def test_gate_does_not_change_well_formed_scoring():
+    """The tiers, matching and precision scaling are untouched; only the parser changed."""
+    with patched(R, "judge_prose", _no_judge):
+        gt = gt_batch(("f", {"id": "A"}), ("f", {"id": "B"}), ("g", {"n": 1}))
+        body = call("f", id="B") + "\n" + call("f", id="X") + "\n" + call("g", n=1)
+        assert abs(R.compute_score(T + body, gt)["score"] - (1.0 + 0.5 + 1.0) / 3) < 1e-9
+        gt1 = gt_call("f", id="A")
+        assert R.compute_score(T + call("f", id="A"), gt1)["score"] == 1.0
+        assert R.compute_score(T + call("f", id="A") + "\n" + call("h", z=1), gt1)["score"] == 0.5
+
+
+# --------------------------------------------------------------------------- key sets
+
+def test_optional_at_default_is_free():
+    rp = prompt_with(TOOL_SCHEMA)
+    gt = gt_call("run", cmd="ls")
+    with patched(R, "judge_prose", _no_judge):
+        # supplying an optional param at its declared default costs nothing, either direction
+        assert R.compute_score(T + call("run", cmd="ls", duration=1.0), gt, raw_prompt=rp)["score"] == 1.0
+        assert R.compute_score(T + call("run", cmd="ls", quiet=False), gt, raw_prompt=rp)["score"] == 1.0
+        gt2 = gt_call("run", cmd="ls", duration=1.0)
+        assert R.compute_score(T + call("run", cmd="ls"), gt2, raw_prompt=rp)["score"] == 1.0
+        # a NON-default value is a real disagreement -> keys differ, key set still valid -> 0.5
+        assert R.compute_score(T + call("run", cmd="ls", duration=9.0), gt, raw_prompt=rp)["score"] == 0.5
+        # False is not 0 and 1 is not 1.0: no accidental stripping
+        assert R.compute_score(T + call("run", cmd="ls", quiet=0), gt, raw_prompt=rp)["score"] == 0.5
+
+
+def test_schema_valid_key_set_earns_the_half_tier():
+    rp = prompt_with(TOOL_SCHEMA)
+    gt = gt_call("run", cmd="ls -la", duration=5.0)
+    with patched(R, "judge_prose", _no_judge):
+        # correct command, optional param dropped: a real call the tool accepts, no longer 0.0
+        assert R.compute_score(T + call("run", cmd="ls -la"), gt, raw_prompt=rp)["score"] == 0.5
+        # a required param missing is still 0.0
+        assert R.compute_score(T + call("run", duration=5.0), gt, raw_prompt=rp)["score"] == 0.0
+        # an undeclared key is still 0.0
+        assert R.compute_score(T + call("run", cmd="ls -la", duration=5.0, nope=1), gt, raw_prompt=rp)["score"] == 0.0
+        # the wrong tool is still 0.0
+        assert R.compute_score(T + call("other", cmd="ls -la"), gt, raw_prompt=rp)["score"] == 0.0
+
+
+def test_no_schema_keeps_exact_key_sets():
+    gt = gt_call("run", cmd="ls -la", duration=5.0)
+    with patched(R, "judge_prose", _no_judge):
+        assert R.compute_score(T + call("run", cmd="ls -la"), gt)["score"] == 0.0
+        assert R.compute_score(T + call("run", cmd="ls -la", duration=5.0), gt)["score"] == 1.0
+
+
+def test_schemas_from_prompt_is_robust():
+    assert R.schemas_from_prompt(None) == {} and R.schemas_from_prompt([]) == {}
+    assert R.schemas_from_prompt([{"role": "user", "content": "hi"}]) == {}
+    assert R.schemas_from_prompt([{"role": "system", "content": "no tools here"}]) == {}
+    s = R.schemas_from_prompt(prompt_with(TOOL_SCHEMA))
+    assert set(s) == {"run"} and s["run"]["required"] == ["cmd"]
+
+
+def test_result_keys_constant_and_complete():
+    rp = prompt_with(TOOL_SCHEMA)
+    with patched(R, "judge_prose", lambda u, c: (1.0, "")):
+        seen = {tuple(sorted(R.compute_score(r, gt, last_user_message="hi", raw_prompt=rp)))
+                for r in (T + call("run", cmd="ls"), call("run", cmd="ls"), T + "hi",
+                          T + BAD_MARKUP[0], "")
+                for gt in (gt_call("run", cmd="ls"), gt_msg(), "not json", "null")}
+    assert len(seen) == 1 and seen.pop() == tuple(sorted(R.RESULT_KEYS))
 
 
 if __name__ == "__main__":

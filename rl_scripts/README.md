@@ -80,6 +80,117 @@ Manager: `verl/workers/reward_manager/nemotron_judge_v4.py`
 (`NemotronJudgeV4RewardManager`). Tests:
 `tests/utils/reward_score/test_nemotron_unified_v4_on_cpu.py`.
 
+## olive_rl300k run
+
+`rl_scripts/olive_rl300k_grpo.sh` -> `nemotron_unified_grpo_sft737.sh` ->
+`nemotron_unified_grpo.sh`. Data `rl-data/olive_rl300k` (296,814 train / 2,970 val,
+`data_source="olive_rl300k"`, built by `examples/data_preprocess/olive_rl300k_preprocess.py`).
+Reward `verl/utils/reward_score/olive_rl300k.py`, routed by `data_source` inside the
+existing `NemotronJudgeRewardManager` - no new manager.
+
+Policy: `models/Qwen3-4B-Base-olive-sft-1074`, epoch 3 of 3 (the final step) of
+`models-sft/abdelrahman-qwen-olive-32k-bs8-3ep-30gpu`, copied in and weight-for-weight
+identical to the source. **Its `tokenizer_config.json` shipped a 723-char template that
+renders neither tool-role messages nor `tool_calls`** - it silently changed 220 of 300
+sampled prompts, dropping every `<tool_response>` and every structured call from the
+history. `chat_template_tooling.jinja` was installed over it (original preserved at
+`tokenizer_config.json.pre-tooling-template.bak`); prompts now render byte-identically to
+what `Qwen3-4B-Base-sft-737` produces. This is the same repair that checkpoint needed.
+
+What the wrapper changes and why:
+
+- **`data.max_prompt_length=28672`** (the other runs use 12288). Measured on 4,957 rows
+  sampled across every row group: p50 4,273, p90 22,283, p99 34,904, max 51,064. At 12288,
+  `filter_overlong_prompts` drops 23.5% of the corpus, and not evenly - 93.8% of
+  openresearcher, 87.2% of openseeker and 60.9% of swe-zero-openhands, leaving roughly the
+  old nemotron_unified corpus. 28672 drops 3.89% (23.3% / 27.7% / 7.6%) and keeps every
+  source. The ceiling is the checkpoint: it was SFT'd at 32k and its
+  `max_position_embeddings` is **32768**, not the 40960 of sft-737, so prompt + response
+  must fit 32768 and 28672 + 4096 lands exactly on it.
+- **`use_dynamic_bsz=True`, `ppo_max_token_len_per_gpu=32768`** on the actor and the rollout
+  log-prob pass. The inherited fixed `ppo_micro_batch_size_per_gpu=2` would be ~66k tokens
+  per backward at these lengths; the logits alone (vocab 151,936) are ~20 GB. Token-budgeted
+  batching caps it instead. The budget must be >= one full sequence. With `use_dynamic_bsz`
+  on, the inherited micro-batch settings are ignored, not conflicting.
+- **`trainer.total_training_steps`**: 296,814 rows at `train_batch_size=32` is 9,275 steps
+  for one epoch, so the run ends on a step count rather than on the corpus.
+- **`trainer.max_actor_ckpt_to_keep=null`** overrides the inherited `=2`. `null` is verl's own
+  default and disables pruning entirely (`checkpoint_manager.py` returns early on a falsy
+  value). The v4 run was limited to 2 and left seven 12 KB stubs where the weights had been,
+  so only its last two steps were ever convertible. ~47 GB per checkpoint against 451 T free
+  on `/mnt/data01`: retention is not the constraint, losing a checkpoint you wanted is.
+
+Corpus mix is the sources' natural one, *not* the 33/33/33 of the unified corpus:
+54% single call, 31% prose, 15% parallel batch.
+
+Two changes were made to the reward before this run, both measured on the val split:
+
+- **v4's format gate replaced `nemotron_pivot.extract_action`.** The tiered scoring logic is
+  untouched; only the parser changed. A response must be one `<think>` block then prose or
+  well-formed `<tool_call>` blocks, nothing salvaged from broken markup. A broken think block
+  scores `THINK_ERROR_SCORE` (-1.0) with no judge call. On the v3 run 3.90% of rollouts
+  collected tool reward the gate rejects (7.20% markup errors); under v4 those are 0.42% and
+  0.76%. The generation prompt ends at `<|im_start|>assistant\n` with no pre-filled `<think>`,
+  exactly as in the v4 run, so the gate is asking for what the policy already does.
+- **The key-set cliff was removed.** `set(expected_args) != set(emitted_args)` used to score
+  0.0, the same as calling a completely different tool. Only 19% of call rows have no optional
+  params. Now optional params left at their declared default are stripped from both sides
+  before comparison, and a key set the tool would accept (all required present, nothing
+  undeclared) earns the 0.5 tier. Effect, val split:
+
+  | perturbation of the expert action | before | after |
+  |---|---|---|
+  | add an optional param at its schema default (14% of rows exposed) | 62% score 0.0 | 100% score 1.0 |
+  | omit one optional param the expert supplied (77% exposed) | 82% score 0.0 | 0.7% score 0.0 |
+
+  The ordering inversion is gone: a correct call missing an optional param used to score below
+  a call with entirely wrong arguments. The cost is that a wrong-argument call to the right
+  tool now averages +0.50 rather than +0.43, because key-set misses that used to fall to 0.0
+  land on 0.5 instead. Expert actions still score 1.0 on 2,029/2,029 val call rows with the
+  prompt schemas in play, and expert prose reaches the judge on 941/941 prose rows.
+
+### What the run showed (stopped at step 480)
+
+From `Qwen3-4B-Base-olive-sft-1074`, 480 steps over ~2 days on hgx11, then **stopped
+deliberately: the model was degrading on inspection.** Checkpoints 100-450 were all retained.
+
+Mean score per 40-step bucket, from the rollout dumps:
+
+| steps | prose | single | parallel | ALL | full% | half% | zero% | think err | fmt err |
+|---|---|---|---|---|---|---|---|---|---|
+| 1-40 | 0.628 | 0.438 | 0.469 | **0.503** | 34.4% | 41.7% | 23.9% | 1.32% | 1.98% |
+| 121-160 | 0.770 | 0.502 | 0.577 | **0.599** | 36.3% | 47.3% | 16.4% | 0.32% | 0.67% |
+| 241-280 | 0.819 | 0.494 | 0.596 | **0.615** | 38.5% | 45.2% | 16.3% | 0.21% | 0.40% |
+| 361-400 | 0.831 | 0.503 | 0.613 | **0.627** | 38.1% | 46.3% | 15.6% | 0.13% | 0.32% |
+| 441-479 | 0.821 | 0.504 | 0.603 | **0.625** | 39.8% | 44.9% | 15.3% | 0.12% | 0.34% |
+
+Three things to carry into the next run:
+
+- **The reward never showed the degradation.** It rose to ~0.62 by step 240 and was flat
+  after; format and think errors hit run lows (0.12% / 0.34%) and median output length held
+  at ~1.9k chars with no repetition blowup. The quality loss that stopped the run was visible
+  on inspection and invisible to `olive_rl300k.py`. Treat the score plateau as the signal to
+  look at completions, not as evidence the run is fine.
+- **The policy learned call SHAPE, not argument VALUES.** Over 479 steps `full%` moved
+  34.4% -> 39.8% (+5.4) while `zero%` fell 23.9% -> 15.3% (-8.6) and `half%` stayed ~45%.
+  Nearly all the learning was wrong-shape -> right-shape. That is what the tiers pay for, and
+  it is the most likely mechanism behind the proxy divergence above.
+- **`run_terminal` dominates and is capped at 0.5.** It is 46% of all single-call rollouts
+  (10,520 of ~23,000 in the late window), scoring mean 0.474 with **7.3% full and 88.5%
+  half**. Decomposing those 9,205 half-tier rollouts: 73.5% have both `keystrokes` and
+  `duration` wrong, **19.5% have the command verbs right and only the `duration` float wrong**,
+  7.1% only `keystrokes`. So ~1 in 5 is blocked purely by an unguessable timeout number, and
+  excluding `duration` would lift `run_terminal` full-tier from 7.3% to roughly 25%.
+  `browser_search` fails on `query` 99% of the time, which is close to unwinnable by design -
+  there is rarely one correct search query.
+
+Group survival under `filter_groups` fell as the policy converged: prose 38.6% -> 23.5%,
+single 61.8% -> 49.9%, parallel 85.8% -> 76.3%. Weighted that is ~45% of 96 generated groups,
+still clearing the 32 needed in one gen batch. Surviving prose groups carried `mean|adv|`
+0.668 against single's 0.279 - the reward-scale asymmetry from
+`norm_adv_by_std_in_grpo=False` is real and measurable, though partly self-limiting because
+prose survival collapses fastest.
+
 ## Reward internals worth knowing
 
 `verl/utils/reward_score/nemotron_pivot_judge.py`, wired in through
